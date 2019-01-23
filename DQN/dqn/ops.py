@@ -95,11 +95,11 @@ def deconv2d(x,
             out = activation_fn(out)
         return out, w
 
-def crop_and_concat(down_sample, up_sample, data_format = 'NHWC'):
+def crop_and_concat(down_sample, up_sample, data_format = 'NHWC', name='crop_and_concat'):
     """
         Cascade downsample and upsample tensors
     """
-    with tf.variable_scope("crop_and_concat"):
+    with tf.variable_scope(name):
         down_sample_shape = down_sample.get_shape().as_list()
         up_sample_shape = up_sample.get_shape().as_list()
         # offsets for the top left corner of the crop

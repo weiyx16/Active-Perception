@@ -1,5 +1,5 @@
 """
-    -- This agent is utilizing the CNN+16 U-net layer as for the Deep part (16 U-net with 8 different direction and 2 different depth)
+    -- This agent is utilizing the CNN+single U-net layer as for the Deep part
     -- and the input state is 4-channel screen (with different history and memory)
 """
 from __future__ import print_function

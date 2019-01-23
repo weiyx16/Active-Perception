@@ -1,6 +1,7 @@
 """
     -- This agent is utilizing the CNN+single U-net layer as for the Deep part
-    -- and the input state is 4-channel screen (with different history and memory)
+    -- and the input state is 1-channel screen
+    -- we need to convert to 4-channel screen
 """
 from __future__ import print_function
 import os

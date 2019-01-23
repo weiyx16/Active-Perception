@@ -95,18 +95,24 @@ def deconv2d(x,
             out = activation_fn(out)
         return out, w
 
-def crop_and_concat(x1, x2):
+def crop_and_concat(down_sample, up_sample, data_format = 'NHWC'):
     """
         Cascade downsample and upsample tensors
     """
     with tf.variable_scope("crop_and_concat"):
-        x1_shape = tf.shape(x1)
-        x2_shape = tf.shape(x2)
+        down_sample_shape = down_sample.get_shape().as_list()
+        up_sample_shape = up_sample.get_shape().as_list()
         # offsets for the top left corner of the crop
-        offsets = [0, (x1_shape[1] - x2_shape[1]) // 2, (x1_shape[2] - x2_shape[2]) // 2, 0]
-        size = [-1, x2_shape[1], x2_shape[2], -1]
-        x1_crop = tf.slice(x1, offsets, size)
-        return tf.concat([x1_crop, x2], 3)
+        if data_format == 'NCHW':
+            offsets = [0, 0, (down_sample_shape[2] - up_sample_shape[2]) // 2, (down_sample_shape[3] - up_sample_shape[3]) // 2]
+            size = [-1, -1, up_sample_shape[2], up_sample_shape[3]]
+            down_sample_crop = tf.slice(down_sample, offsets, size)
+            return tf.concat(1, [down_sample_crop, up_sample])
+        elif data_format == 'NHWC':
+            offsets = [0, (down_sample_shape[1] - up_sample_shape[1]) // 2, (down_sample_shape[2] - up_sample_shape[2]) // 2, 0]
+            size = [-1, up_sample_shape[1], up_sample_shape[2], -1]
+            down_sample_crop = tf.slice(down_sample, offsets, size)
+            return tf.concat(3, [down_sample_crop, up_sample])
 
 def linear(input_, output_size, stddev=0.02, bias_start=0.0, activation_fn=None, name='linear'):
     """

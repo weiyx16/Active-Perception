@@ -35,13 +35,13 @@ To test the model:
 
     $ python main.py --is_train=False
 
-
 ## References
 
 - [Source code](https://github.com/devsisters/DQN-tensorflow)
 
 ## Notice
-History是指每次观测都观测4次连续结果
+
+History是指每次观测都观测4次连续结果，即连续几次的观测结果合在一起，在通道维度上进行叠加。和batch_size没有影响。  
 
 ## License
 

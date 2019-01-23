@@ -29,7 +29,7 @@ class BaseModel(object):
 
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir)
-        self.saver.save(self.sess, self.checkpoint_dir + 'model.ckpt', global_step=step)
+        self.saver.save(self.sess, self.checkpoint_dir, global_step=step)
 
     def load_model(self):
         print(" [*] Loading checkpoints...")
@@ -44,10 +44,10 @@ class BaseModel(object):
 
     @property
     def checkpoint_dir(self):
-        return os.path.join(self.ckpt_dir, self.env_name + '/')
+        return os.path.join(self.ckpt_dir, self.env_name + '/dqn_model')
 
     @property
     def saver(self):
         if self._saver == None:
-            self._saver = tf.train.Saver(max_to_keep=10)
+            self._saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1.0)
             return self._saver

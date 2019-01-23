@@ -43,7 +43,8 @@ class ReplayMemory:
 
     def getState(self, index):
         """
-            -- According to the index, get the corr screens back
+            -- According to the index, get the corr history back
+            i.e. corr_index and its history(history_length-1)
         """
         assert self.count > 0, " [!] replay memory is empty, use at least --random_steps 1"
         # normalize index to expected range, allows negative indexes
@@ -54,13 +55,14 @@ class ReplayMemory:
             return self.screens[(index - (self.history_length - 1)):(index + 1), ...]
         else:
             # otherwise normalize indexes and use slower list based access
+            # 返回的是对应index的history_length长度的screen，直接压到channel里了
             indexes = [(index - i) % self.count for i in reversed(range(self.history_length))]
             return self.screens[indexes, ...]
 
     def sample(self):
         """
             -- Sample from the history
-            TODO: Why the mini-batch need history???
+            Why the mini-batch need history??? For better training result?
         """
         # memory must include poststate, prestate and ***history***
         assert self.count > self.history_length

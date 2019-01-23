@@ -47,6 +47,7 @@ class DQNConfig(object):
         self.min_reward = -1.
 
         # ----------- Model Params
+        self.inChannel = 4 # RGBD
         self.model = 'm1'
         self.backend = 'tf'
         self.env_type = 'detail'

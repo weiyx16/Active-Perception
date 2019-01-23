@@ -2,7 +2,6 @@
     -- This agent is utilizing the CNN+16 U-net layer as for the Deep part (16 U-net with 8 different direction and 2 different depth)
     -- and the input state is 4-channel screen (with different history and memory)
 """
-from __future__ import print_function
 import os
 import time
 import random
@@ -47,8 +46,8 @@ class Agent(BaseModel):
         max_avg_ep_reward = 0
         ep_rewards, actions = [], []
 
-        # TODO: random init the senario
-        screen, reward, action, terminal = self.env.new_random_game()
+        # TODO:3 random init the senario (init reward = 0, action = -1)
+        screen, reward, action, terminal = self.env.new_scene()
 
         for _ in range(self.history_length):
             self.history.add(screen)
@@ -62,7 +61,8 @@ class Agent(BaseModel):
             # 1. predict
             action = self.predict(self.history.get())
             # 2. act
-            # TODO: Add to simulation
+            # TODO: 4 give action to simulation and get screen(state),reward,terminal back
+            # notice the action is in [0, 48*48*16-1]
             screen, reward, terminal = self.env.act(action, is_training=True)
             # 3. observe & store
             self.observe(screen, reward, action, terminal)
@@ -73,8 +73,8 @@ class Agent(BaseModel):
                 # 注意！这个代码里训练部分没有epoch的概念，每次结束后，接着之前的step / memory 继续去尝试得到新的场景
                 # 所以才会出现memory中间有terminal的情况，在history_length周围有重新开始一次仿真的话，就不get这个sample
                 # 加上epoch（本质就是场景重新开始）也不能让step重置，也就是说初始的learn_start的step满足之后，就不会再回到learn_start的懵懂阶段了
-                # TODO: random init the senario
-                screen, reward, action, terminal = self.env.new_random_game()
+                # TODO:3 random init the senario
+                screen, reward, action, terminal = self.env.new_scene()
 
                 num_game += 1
                 ep_rewards.append(ep_reward)
@@ -520,17 +520,12 @@ class Agent(BaseModel):
         if test_ep == None:
             test_ep = self.ep_end
 
-        if not self.display:
-            tmp_dir = '../tmp/%s-%s' % (self.env_name, get_time())
-            # TODO: env start
-            self.env.env.monitor.start(tmp_dir)
-
         best_reward, best_idx = 0, 0
         for idx in range(n_episode):
-            # TODO: env start feedback
             print("="*30)
             print(" [*] Test Episode %d" %idx, " begins ")
-            screen, reward, action, terminal = self.env.new_random_game()
+            # TODO: env start feedback
+            # screen, reward, action, terminal = self.env.new_random_game()
             current_reward = 0
 
             # initial add
@@ -543,7 +538,7 @@ class Agent(BaseModel):
                 action = self.predict(self.history.get(), test_ep)
                 # 2. act
                 # TODO: Get the feedback
-                screen, reward, terminal = self.env.act(action, is_training=False)
+                # screen, reward, terminal = self.env.act(action, is_training=False)
                 # 3. observe
                 self.history.add(screen)
 
@@ -557,9 +552,3 @@ class Agent(BaseModel):
 
             print(" End in step : %d" %(end_step))
             print(" Best episode : [%d] Best reward : %d" % (best_idx, best_reward))
-            print("="*30)
-
-        if not self.display:
-            # TODO: Close the simulation
-            self.env.env.monitor.close()
-            #gym.upload(tmp_dir, writeup='https://github.com/devsisters/DQN-tensorflow', api_key='')

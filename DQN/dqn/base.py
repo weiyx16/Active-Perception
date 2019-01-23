@@ -1,9 +1,5 @@
 import os
-import pprint
 import tensorflow as tf
-
-# 输出格式的对象字符串到指定的stream,最后以换行符结束。
-pp = pprint.PrettyPrinter().pprint
 
 class BaseModel(object):
     """
@@ -12,8 +8,6 @@ class BaseModel(object):
     def __init__(self, config):
         self._saver = None
         self.config = config.list_all_member()
-        print(" [*] Current Configuration")
-        pp(self.config)
 
         for attr in self.config:
             if attr.startswith('__'):
@@ -40,11 +34,13 @@ class BaseModel(object):
             return True
         else:
             print(" [!] Load FAILED: %s" % self.checkpoint_dir)
+            print(" [*] Created model with fresh parameters.")
+            self.sess.run(tf.global_variables_initializer())
             return False
 
     @property
     def checkpoint_dir(self):
-        return os.path.join(self.ckpt_dir, self.env_name + '/dqn_model')
+        return os.path.join(self.ckpt_dir, self.env_name + '/dqn_model.ckpt')
 
     @property
     def saver(self):

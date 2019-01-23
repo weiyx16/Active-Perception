@@ -10,6 +10,9 @@ import tensorflow as tf
 from dqn.agent import Agent
 from dqn.environment import DQNEnvironment
 from config import DQNConfig
+import pprint
+# 输出格式的对象字符串到指定的stream,最后以换行符结束。
+pp = pprint.PrettyPrinter().pprint
 
 """
     -- Params config
@@ -48,18 +51,23 @@ def main(_):
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
         config = DQNConfig(FLAGS) or FLAGS
+        print(" [*] Current Configuration")
+        pp(config.list_all_member())
 
         env = DQNEnvironment(config)
         print(config.env_name)
         if not tf.test.is_gpu_available() and FLAGS.use_gpu:
             raise Exception("use_gpu flag is true when no GPUs are available")
 
+        # TODO: 1 开始仿真
         agent = Agent(config, env, sess)
         
         if config.is_train:
             agent.train()
         else:
             agent.play()
+
+        # TODO: 2 结束仿真
 
 if __name__ == '__main__':
     # 上述第一行代码表示如果当前是从其它模块调用的该模块程序，则不会运行main函数！而如果就是直接运行的该模块程序，则会运行main函数。

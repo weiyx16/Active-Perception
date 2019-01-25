@@ -234,6 +234,7 @@ class Agent(BaseModel):
                     [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='s_t')
 
             # Dowmsampling
+            # TODO: Update to 128*128 now so you need to add layers
             # s_t = None*64*64*16(history_length*inChannel)
             for i in range(16):
                 idx = str(i)

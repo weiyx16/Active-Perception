@@ -38,10 +38,10 @@ class DQNConfig(object):
 
         # ----------- Environment Params
         self.env_name = 'Act_Perc'
-
-        # In furthur case you can just use local infomation with 64*64 or 32*32 pixel.
-        self.screen_width  = 64
-        self.screen_height = 64
+        self.Lua_PATH = r'../affordance_model/infer.lua'
+        # In furthur case you can just use local infomation with 64*64 or 128*128 pixel.
+        self.screen_width  = 128
+        self.screen_height = 128
 
         self.max_reward = 1.
         self.min_reward = -1.

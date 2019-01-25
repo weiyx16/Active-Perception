@@ -24,7 +24,7 @@ except:
 
 from ur5 import UR5
 
-class Camera():
+class Camera(object):
 
     def __init__(self, clientID):
         """

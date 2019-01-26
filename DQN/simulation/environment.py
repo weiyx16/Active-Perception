@@ -23,11 +23,13 @@ except:
     print ('--------------------------------------------------------------')
     print ('')
 
+# TODO: what's the range of color/depth for each network (like affordance map network/ post process/ DQN?)
+
 class Camera(object):
     """
         # kinect camera in simulation
     """
-    def __init__(self, clientID):
+    def __init__(self, clientID, Lua_PATH):
         """
             Initialize the Camera in simulation
         """
@@ -37,7 +39,8 @@ class Camera(object):
         self.Save_PATH_COLOR = r'./color/'
         self.Save_PATH_DEPTH = r'./depth/'
         self.Save_PATH_RES = r'./afford_h5/'
-        self.Dis_FAR = 10
+        self.Lua_PATH = Lua_PATH
+        self.Dis_FAR = 10 #TODO:
         self.INT16 = 65535
         self.Img_WIDTH = 512
         self.Img_HEIGHT = 424
@@ -47,6 +50,8 @@ class Camera(object):
         self.Camera_DEPTH_NAME = r'kinect_depth'
         self.clientID = clientID
         self._setup_sim_camera()
+        self.bg_color = np.empty((3, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
+        self.bg_depth = np.empty((1, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
 
     def _euler2rotm(self,theta):
         """
@@ -105,8 +110,7 @@ class Camera(object):
             -- use this function to save background RGB and Depth in the beginning
             -- it is used for the post process of affordance map
         """
-        self.bg_color = np.empty((3, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
-        self.bg_depth = np.empty((1, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
+        self.bg_depth, self.bg_color = self.get_camera_data()
 
     def get_camera_data(self):
         """
@@ -132,6 +136,7 @@ class Camera(object):
         # zNear = 0.01
         # zFar = 10
         # depth_img = depth_img * (zFar - zNear) + zNear
+        # TODO: ? What's the range?
         depth_img[depth_img < 0] = 0
         depth_img[depth_img > 1] = 1
         depth_img = depth_img * self.INT16
@@ -184,11 +189,12 @@ class Camera(object):
         """
         # first get the current img data first
         cur_depth, cur_color = self.get_camera_data()
+        self.cur_depth = cur_depth
         cur_depth_path, cur_img_path = self.save_image(cur_depth, cur_color, img_idx)
         
         # feed this image into affordance map network and get the h5 file
         cur_res_path = self.Save_PATH_RES + str(img_idx) + '_results.h5'
-        affordance_cmd = 'th ' + Lua_PATH + ' -imgColorPath ' + cur_img_path + \
+        affordance_cmd = 'th ' + self.Lua_PATH + ' -imgColorPath ' + cur_img_path + \
                         ' -imgDepthPath ' + cur_depth_path + ' -resultPath ' + cur_res_path
         try:
             os.system(affordance_cmd)
@@ -228,7 +234,7 @@ class Camera(object):
             # postprocess the affordance map
             # convert from the afford_model from matlab to python
         """
-
+        cur_color = cur_color / 255.0
         rgb_sim = np.sum((np.abs(cur_color - self.bg_color) < 0.3), axis = 2)
         foregroundMaskColor = np.logical_not(rgb_sim == 3)
 
@@ -323,14 +329,14 @@ class Camera(object):
         cloud_normals = ne.compute()
         return cloud_normals
 
-    def pixel2ur5(self, u, v, cur_depth, camera_disfar, ur5_position):
+    def pixel2ur5(self, u, v, ur5_position, push_depth):
         """
             from pixel u,v and correspondent depth z -> coor in ur5 coordinate (x,y,z)
         """
-        depth = cur_depth[u][v] / self.INT16 * camera_disfar
+        depth = self.cur_depth[u][v] / self.INT16 * self.Dis_FAR
         x = depth*(u - self.intri[0][2]) / self.intri[0][0]
         y = depth*(v - self.intri[1][2]) / self.intri[1][1]
-        camera_coor = np.array([x, y, depth])
+        camera_coor = np.array([x, y, depth - push_depth])
 
         """
             from camera coor to ur5 coor
@@ -350,7 +356,7 @@ class UR5(object):
         self.RAD2DEG = 180 / math.pi   # 常数，弧度转度数
         self.tstep = 0.005             # 定义仿真步长
         self.targetPosition=np.zeros(3,dtype=np.float)#目标位置
-        self.targetQuaternion=np.zeros(4)
+        self.targetQuaternion=np.array([0.707, 0, 0.707, 0])
         # 配置关节信息
         self.jointNum = 6
         self.baseName = 'UR5'         #机器人名字
@@ -360,9 +366,9 @@ class UR5(object):
         self.jointangel=[-111.5,-22.36,88.33,28.08,-90,-21.52]
         # 配置方块信息
         self.cubename= 'imported_part_'
-        self.filename= 'test-10-obj-0'
+        self.filename= 'test-10-obj-'
         self.scenepath = './scenes'
-        self.cubenum = 12
+        self.cubenum = 11
         self.cubeHandle = np.zeros((self.cubenum,), dtype=np.int) # 各cubehandle
         self.obj_colors=[]
         self.obj_positions=[]
@@ -411,7 +417,7 @@ class UR5(object):
         """
             initial the scene (the arrangement of the blocks)
         """
-        fileadd=os.path.join(self.scenepath,self.filename+str(filenum)+'.txt')
+        fileadd=os.path.join(self.scenepath, self.filename+str('%02d' % filenum)+'.txt')
         fs = open(fileadd, 'r')
         file_content = fs.readlines()
         for object_idx in range(self.cubenum):
@@ -446,15 +452,15 @@ class UR5(object):
         _, self.ur5_handle = vrep.simxGetObjectHandle(self.clientID, self.baseName, vrep.simx_opmode_oneshot_wait)
         return self.ur5_handle
 
-    def ur5moveto(self,x,y,z):
+    def get_position(self):
+        return self.position
+
+    def ur5moveto(self, move_to_location):
+        """
+            Push the ur5 hand to the location of move_to_location
+        """
         vrep.simxSynchronousTrigger(self.clientID) # 让仿真走一步 
-        self.targetQuaternion[0]=0.707
-        self.targetQuaternion[1]=0
-        self.targetQuaternion[2]=0.707
-        self.targetQuaternion[3]=0      #四元数
-        self.targetPosition[0]=x
-        self.targetPosition[1]=y
-        self.targetPosition[2]=z
+        self.targetPosition = move_to_location
         vrep.simxPauseCommunication(self.clientID, True)    #开启仿真
         vrep.simxSetIntegerSignal(self.clientID, 'ICECUBE_0', 21, vrep.simx_opmode_oneshot)
         for i in range(3):
@@ -484,14 +490,14 @@ class DQNEnvironment(object):
     """
     def __init__(self, config):
         self.Lua_PATH = config.Lua_PATH
+        self.EDG2RAD = math.pi / 180
         # initial the ur5 arm in simulation
         self.ur5 = UR5()
         self.ur5.connect()
         self.ur5.ankleinit()
-        # TODO: 这里需要先init 盒子和桌子（但不init block）
         # initial the camera in simulation
         self.clientID = self.ur5.get_clientID()
-        self.camera = Camera(self.clientID)
+        self.camera = Camera(self.clientID, self.Lua_PATH)
         self.camera._bg_init()
 
         self.terminal = False
@@ -536,8 +542,18 @@ class DQNEnvironment(object):
             use this two affordance map -> reward
             use new affordance map -> terminal
         """
-        pass
-        # return camera_data(screen), reward, terminal
+        # act on the scene
+        move_to_location = self.action2ur5(action)
+        self.ur5.ur5moveto(move_to_location)
+
+        # get the new camera_data
+        self.index = (self.index + 1)% self.save_size
+        # location_2d stores the maximum affordance value coor know in the scene
+        self.local_afford_past = self.local_afford_new
+        self.screen, self.local_afford_new, self.location_2d = self.camera.local_patch(self.index, (self.screen_height, self.screen_width))
+        self.reward = self.calcreward()
+        self.terminal = self.ifterminal()
+        return self.screen, self.reward, self.terminal
 
     def calcreward(self):
         """
@@ -557,4 +573,25 @@ class DQNEnvironment(object):
             then convert x,y,depth to pixel coor(according to the location_2d)
             then convert to coor in ur5
         """
-        pass
+        # 96, 96 is the output of the u-net
+        idx = np.unravel_index(action, (96, 96, 16))
+        relate_local = list(idx[0:2])
+        ori_depth_idx = np.unravel_index(int(idx[2]), (8,2))
+        ori = ori_depth_idx[0] * 360. / 8.
+        push_depth = ori_depth_idx[1] * 0.02 # choose in two depth 0 or 0.02 (deeper than the pixel depth)
+        push_dis = self.screen_height // 4 # fix the push distance in 32 pixel 
+
+        # seems the output of the u-net is the same size of input so we need to resize the output idx
+        relate_local = (np.asarray(relate_local) + 1.0) * self.screen_height / 96 - 1.0
+        relate_local = np.round(relate_local)
+        real_local = relate_local
+        real_local[0] = self.location_2d[0] + relate_local[0] - self.screen_height // 2
+        real_local[1] = self.location_2d[1] + relate_local[1] - self.screen_width // 2
+
+        real_dest = real_local
+        real_dest[0] = real_local[0] + push_dis * math.cos(ori*self.EDG2RAD)
+        real_dest[1] = real_local[1] + push_dis * math.sin(ori*self.EDG2RAD)
+        real_dest = np.round(real_dest)
+
+        # from pixel coor to real ur5 coor
+        return self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5.get_position, push_depth)

@@ -59,11 +59,10 @@ class ReplayMemory:
             # 返回的是对应index的history_length长度的screen，直接压到channel里了
             indexes = [(index - i) % self.count for i in reversed(range(self.history_length))]
             hist_screens = self.screens[indexes, ...]
-        
         # hist_screens is history_length * inChannel * height * width (4-D tensor)
         # **NB** We need to covert to (history_length * inChannel) * h * w (3-D tensor)
         stacked_scr = np.reshape(hist_screens, (self.history_length*self.inChannel, self.dims[0], self.dims[1]))
-        return stacked_scr`
+        return stacked_scr
 
     def sample(self):
         """

@@ -21,7 +21,7 @@ class Agent(BaseModel):
         super(Agent, self).__init__(config)
         self.sess = sess
         self.weight_dir = r'../weights'
-        self.action_num = 48*48*16
+        self.action_num = 96*96*16
         self.env = environment
         self.history = History(self.config)
         self.memory = ReplayMemory(self.config, self.model_dir)
@@ -46,7 +46,6 @@ class Agent(BaseModel):
         max_avg_ep_reward = 0
         ep_rewards, actions = [], []
 
-        # TODO:3 random init the senario (init reward = 0, action = -1)
         screen, reward, action, terminal = self.env.new_scene()
 
         for _ in range(self.history_length):
@@ -61,7 +60,6 @@ class Agent(BaseModel):
             # 1. predict
             action = self.predict(self.history.get())
             # 2. act
-            # TODO: 4 give action to simulation and get screen(state),reward,terminal back
             # notice the action is in [0, 48*48*16-1]
             screen, reward, terminal = self.env.act(action, is_training=True)
             # 3. observe & store
@@ -69,24 +67,23 @@ class Agent(BaseModel):
             # 4. learn
             self.learn()
 
-            if terminal:
-                # 注意！这个代码里训练部分没有epoch的概念，每次结束后，接着之前的step / memory 继续去尝试得到新的场景
-                # 所以才会出现memory中间有terminal的情况，在history_length周围有重新开始一次仿真的话，就不get这个sample
-                # 加上epoch（本质就是场景重新开始）也不能让step重置，也就是说初始的learn_start的step满足之后，就不会再回到learn_start的懵懂阶段了
-                # TODO:3 random init the senario
-                screen, reward, action, terminal = self.env.new_scene()
-
-                num_game += 1
-                ep_rewards.append(ep_reward)
-                ep_reward = 0.
-            else:
-                ep_reward += reward
-
             # 注意 ep_reward属于在每次simulation里的总和
             # 把每次simulation得到总reward存成list放在ep_rewards里，在test_step来的时候存下来
             # 而 total_reward属于在test_step里的总和
             actions.append(action)
             total_reward += reward
+
+            if terminal:
+                # 注意！这个代码里训练部分没有epoch的概念，每次结束后，接着之前的step / memory 继续去尝试得到新的场景
+                # 所以才会出现memory中间有terminal的情况，在history_length周围有重新开始一次仿真的话，就不get这个sample
+                # 加上epoch（本质就是场景重新开始）也不能让step重置，也就是说初始的learn_start的step满足之后，就不会再回到learn_start的懵懂阶段了
+                screen, reward, action, terminal = self.env.new_scene()
+                self.history.add(screen)
+                num_game += 1
+                ep_rewards.append(ep_reward)
+                ep_reward = 0.
+            else:
+                ep_reward += reward
 
             if self.step >= self.learn_start:
                 if self.step % self.test_step == self.test_step - 1:
@@ -190,7 +187,7 @@ class Agent(BaseModel):
         # notice get eval in the new state
         # s_t_plus_l已经是batch_size*x*x*x的4-D tensor了
         q_t_plus_1 = self.target_q_flat.eval({self.target_s_t: s_t_plus_1})
-        # q_t_plus_l = batch_size * self.action_num(48*48*16)
+        # q_t_plus_l = batch_size * self.action_num(96*96*16)
 
         terminal = np.array(terminal) + 0.
         max_q_t_plus_1 = np.max(q_t_plus_1, axis=1) #对每个sample 得到所有动作里最大的q_value
@@ -233,49 +230,71 @@ class Agent(BaseModel):
                 self.s_t = tf.placeholder('float32',
                     [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='s_t')
 
-            # Dowmsampling
-            # TODO: Update to 128*128 now so you need to add layers
-            # s_t = None*64*64*16(history_length*inChannel)
+            # s_t = None*128*128*16(history_length*inChannel)
             for i in range(16):
                 idx = str(i)
+                # downsample_1
                 self.w = {}
                 self.l1, self.w['l1_1_w'], self.w['l1_1_b'] = conv2d(self.s_t,
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_1')
-                # l1 = None*62*62*128
+                # l1 = None*126*126*128
                 self.l2, self.w['l1_2_w'], self.w['l1_2_b'] = conv2d(self.l1,
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_2')
-                # l2 = None*60*60*128
+                # l2 = None*124*124*128
 
-                self.l3 = max_pool(self.l2, [2, 2], [1, 1], self.cnn_format, name='m1')
-                # l3 = None*30*30*128
+                self.l3 = max_pool(self.l2, [2, 2], [1, 1], self.cnn_format, name=idx +'_m1')
+                # l3 = None*62*62*128
 
-                # Bottom layer
+                # downsample_2 (adjusted)
                 self.l4, self.w['l2_1_w'], self.w['l2_1_b'] = conv2d(self.l3,
                     256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l2_1')
-                # l4 = None*28*28*256
-                self.l5, self.w['l2_2_w'], self.w['l2_2_b'] = conv2d(self.l4,
-                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l2_2')            
-                # l5 = None*26*26*256
+                # l4 = None*60*60*256
 
-                # Upsampling
-                self.l6, self.w['U1_w'] = deconv2d(self.l5, 
+                self.l5 = max_pool(self.l4, [2, 2], [1, 1], self.cnn_format, name=idx +'_m2')
+                # l5 = None*30*30*256
+                                
+                # Bottom layer
+                self.l6, self.w['l3_1_w'], self.w['l3_1_b'] = conv2d(self.l5,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_1')
+                # l6 = None*28*28*512
+                self.l7, self.w['l3_2_w'], self.w['l3_2_b'] = conv2d(self.l6,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_2')            
+                # l7 = None*26*26*512
+
+                # Upsampling_1
+                self.l8, self.w['U1_w'] = deconv2d(self.l7, 
                     [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U1')
-                # l6 = None*52*52*128
+                # l8 = None*52*52*256
 
-                # Cascading (l2, l6)
-                self.l7 = crop_and_concat(self.l2, self.l6, self.cnn_format, name=idx+'_CrConc')
-                # l7 = None*52*52*256
+                # Cascading (l4, l8)
+                self.l9 = crop_and_concat(self.l4, self.l8, self.cnn_format, name=idx+'_CrConc1')
+                # l9 = None*52*52*512
 
-                # Conv2d->output
-                self.l8, self.w['l3_1_w'], self.w['l3_1_b'] = conv2d(self.l7,
-                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_1')
-                # l8 = None*50*50*64
-                self.l9, self.w['l3_2_w'], self.w['l3_2_b'] = conv2d(self.l8,
-                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_2')
-                # l9 = None*48*48*4(inChannel)
-                self.q, self.w['q_w'], self.w['q_b'] = conv2d(self.l9,
+                # Conv2d
+                self.l10, self.w['l4_1_w'], self.w['l4_1_b'] = conv2d(self.l9,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l4_1')
+                # l10 = None*50*50*256
+
+                # Upsampling_2
+                self.l11, self.w['U2_w'] = deconv2d(self.l10, 
+                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U2')
+                # l11 = None*100*100*128       
+                       
+                # Cascading (l2, l11)
+                self.l12 = crop_and_concat(self.l2, self.l11, self.cnn_format, name=idx+'_CrConc2')
+                # l12 = None*100*100*256
+
+                # Conv2d                
+                self.l13, self.w['l5_1_w'], self.w['l5_1_b'] = conv2d(self.l12,
+                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l5_1')
+                # l13 = None*98*98*64(inChannel)
+                self.l14, self.w['l5_2_w'], self.w['l5_2_b'] = conv2d(self.l13,
+                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l5_2')
+                # l14 = None*96*96*4(inChannel)
+                # ->output
+                self.q, self.w['q_w'], self.w['q_b'] = conv2d(self.l14,
                     1, [1, 1], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_lq')
-                # q = None*48*48*1
+                # q = None*96*96*1
                 # [ref] https://www.jianshu.com/p/f9b0c2c74488 https://blog.csdn.net/qq_18293213/article/details/72423592
 
                 if i == 0:
@@ -287,10 +306,10 @@ class Agent(BaseModel):
                         self.q_all = tf.concat(1, [self.q_all, self.q])
                 self.w_all.append(self.w)
 
-            # q_all = None*48*48*16
+            # q_all = None*96*96*16
             shape = self.q_all.get_shape().as_list()
             self.q_flat = tf.reshape(self.q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(48^2*16)
+            # q_flat = None*(96^2*16)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
             # Find every max q_flat -> action index for each sample in batch
             self.q_action = tf.argmax(self.q_flat, dimension=1)
@@ -315,52 +334,72 @@ class Agent(BaseModel):
                 self.target_s_t = tf.placeholder('float32',
                     [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='target_s_t')
             
+            # s_t = None*128*128*16(history_length*inChannel)
             for i in range(16):
                 idx = str(i)
+                # downsample_1
                 self.t_w = {}
-                # Dowmsampling
-                # s_t = None*64*64*16(history_length*inChannel)
                 self.target_l1, self.t_w['l1_1_w'], self.t_w['l1_1_b'] = conv2d(self.target_s_t,
-                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l1_1')
-                # l1 = None*62*62*128
+                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_1')
+                # l1 = None*126*126*128
                 self.target_l2, self.t_w['l1_2_w'], self.t_w['l1_2_b'] = conv2d(self.target_l1,
-                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l1_2')
-                # l2 = None*60*60*128
+                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_2')
+                # l2 = None*124*124*128
 
-                self.target_l3 = max_pool(self.target_l2, [2, 2], [1, 1], self.cnn_format, name=idx+'_target_m1')
-                # l3 = None*30*30*128
+                self.target_l3 = max_pool(self.target_l2, [2, 2], [1, 1], self.cnn_format, name=idx +'_target_m1')
+                # l3 = None*62*62*128
 
-                # Bottom layer
+                # downsample_2 (adjusted)
                 self.target_l4, self.t_w['l2_1_w'], self.t_w['l2_1_b'] = conv2d(self.target_l3,
-                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l2_1')
-                # l4 = None*28*28*256
-                self.target_l5, self.t_w['l2_2_w'], self.t_w['l2_2_b'] = conv2d(self.target_l4,
-                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l2_2')            
-                # l5 = None*26*26*256
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l2_1')
+                # l4 = None*60*60*256
 
-                # Upsampling
-                self.target_l6, self.t_w['U1_w'] = deconv2d(self.target_l5, 
-                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx+'_target_U1')
-                # l6 = None*52*52*128
+                self.target_l5 = max_pool(self.target_l4, [2, 2], [1, 1], self.cnn_format, name=idx +'_target_m2')
+                # l5 = None*30*30*256
+                                
+                # Bottom layer
+                self.target_l6, self.t_w['l3_1_w'], self.t_w['l3_1_b'] = conv2d(self.target_l5,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_1')
+                # l6 = None*28*28*512
+                self.target_l7, self.t_w['l3_2_w'], self.t_w['l3_2_b'] = conv2d(self.target_l6,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_2')            
+                # l7 = None*26*26*512
 
-                # Cascading (l2, l6)
-                self.target_l7 = crop_and_concat(self.target_l2, self.target_l6, self.cnn_format)
-                # l7 = None*52*52*256
+                # Upsampling_1
+                self.target_l8, self.t_w['U1_w'] = deconv2d(self.target_l7, 
+                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U1')
+                # l8 = None*52*52*256
 
-                # Conv2d->output
-                self.target_l8, self.t_w['l3_1_w'], self.t_w['l3_1_b'] = conv2d(self.target_l7,
-                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l3_1')
-                # l8 = None*50*50*64
-                self.target_l9, self.t_w['l3_2_w'], self.t_w['l3_2_b'] = conv2d(self.target_l8,
-                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_l3_2')
-                # l9 = None*48*48*4(inChannel)
-                self.target_q, self.t_w['q_w'], self.t_w['q_b'] = conv2d(self.target_l9,
-                    1, [1, 1], [1, 1], initializer, activation_fn, self.cnn_format, name=idx+'_target_lq')
-                # q = None*48*48*1
+                # Cascading (l4, l8)
+                self.target_l9 = crop_and_concat(self.target_l4, self.target_l8, self.cnn_format, name=idx+'_target_CrConc1')
+                # l9 = None*52*52*512
 
-                # 将输出沿着batch size那一层展开，为了后面可以找batch里每个sample的最大value(即操作点所在的位置)
-                self.target_q = tf.squeeze(self.target_q)
-                # q = None*48*48
+                # Conv2d
+                self.target_l10, self.t_w['l4_1_w'], self.t_w['l4_1_b'] = conv2d(self.target_l9,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l4_1')
+                # l10 = None*50*50*256
+
+                # Upsampling_2
+                self.target_l11, self.t_w['U2_w'] = deconv2d(self.target_l10, 
+                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U2')
+                # l11 = None*100*100*128       
+                       
+                # Cascading (l2, l11)
+                self.target_l12 = crop_and_concat(self.target_l2, self.target_l11, self.cnn_format, name=idx+'_target_CrConc2')
+                # l12 = None*100*100*256
+
+                # Conv2d                
+                self.target_l13, self.t_w['l5_1_w'], self.t_w['l5_1_b'] = conv2d(self.target_l12,
+                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l5_1')
+                # l13 = None*98*98*64(inChannel)
+                self.target_l14, self.t_w['l5_2_w'], self.t_w['l5_2_b'] = conv2d(self.target_l13,
+                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l5_2')
+                # l14 = None*96*96*4(inChannel)
+                # ->output
+                self.target_q, self.t_w['q_w'], self.t_w['q_b'] = conv2d(self.target_l14,
+                    1, [1, 1], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_lq')
+                # q = None*96*96*1
+                # [ref] https://www.jianshu.com/p/f9b0c2c74488 https://blog.csdn.net/qq_18293213/article/details/72423592
 
                 if i == 0:
                     self.target_q_all = self.target_q
@@ -373,7 +412,7 @@ class Agent(BaseModel):
 
             shape = self.target_q_all.get_shape().as_list()
             self.target_q_flat = tf.reshape(self.target_q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(48^2*16)
+            # q_flat = None*(96^2*16)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
 
             # TODO: What's there two stuffs for????
@@ -407,8 +446,7 @@ class Agent(BaseModel):
             # e.g. batch = 3, action = 4 init = [3,2,3]
             # [0,0,0,1] [0,0,1,0] [0,0,0,1] -> stands for choosing the 4-th/3-rd/4-th action each
             # although here the batch size is not assigned (none)
-            # TODO: action_size is not availble easily for now: 48*48*16
-            action_one_hot = tf.one_hot(self.action, 48*48*16, 1.0, 0.0, name='action_one_hot')
+            action_one_hot = tf.one_hot(self.action, self.action_num, 1.0, 0.0, name='action_one_hot')
             # Only set the chosen action to have value, with others = none
             # reduction_indices = axis -> q_acted = batch_size * 1
             # 利用one-hot方法只保留采取动作对应的q值

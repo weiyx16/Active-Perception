@@ -10,6 +10,7 @@ import PIL.Image as Image
 import array
 import h5py
 import cv2 as cv
+from scipy.ndimage.filters import uniform_filter
 import pcl
 
 try:
@@ -286,7 +287,13 @@ class Camera(object):
         surfaceNormalsMap.ravel()[self._sub2ind(surfaceNormalsMap.shape,pixY,pixX,3*tmp-1)] = foregroundNormals[:,2]
         
         # filter the affordance map
-        meanStdNormals = np.mean(self._stdfilt(surfaceNormalsMap, np.ones((25,25))),axis = 2)
+        tmp = np.zeros(surfaceNormalsMap.shape)
+        tmp[:,:,0] = self._window_stdev(surfaceNormalsMap[:,:,0],25)*25*25/(25*25-1)
+        tmp[:,:,1] = self._window_stdev(surfaceNormalsMap[:,:,1],25)*25*25/(25*25-1)
+        tmp[:,:,2] = self._window_stdev(surfaceNormalsMap[:,:,2],25)*25*25/(25*25-1)
+        # accelarate the filter
+        meanStdNormals = np.mean(tmp,axis = 2)
+
         normalBasedSuctionScores = np.ones(meanStdNormals.shape) - meanStdNormals / np.nanmax(meanStdNormals)
         cur_afford[np.where(normalBasedSuctionScores < 0.05)] = 0 
         cur_afford[np.where(foregroundMask == False)] = 0 
@@ -294,23 +301,15 @@ class Camera(object):
 
         return post_afford
 
-    def _stdfilt(self, src_img, filter):
+    def _window_stdev(self, X, window_size):
         """
             std filt in np
-            # TODO: convert to conv2d function for faster?
         """
-        h,w,d = src_img.shape
-        half_filter = int(filter.shape[0]/2)
-        tmp = np.ones((h,half_filter,d))
-        newmap = np.hstack((tmp,src_img,tmp))
-        tmp = np.ones((half_filter,w+2*half_filter,d))
-        newmap = np.vstack((tmp,newmap,tmp))
-        ians = np.zeros(src_img.shape)
-        for i in range(0, h):
-            for j in range(0, w):
-                tmpmap = newmap[i:i+2*half_filter+1,j:j+2*half_filter+1,:]
-                ians[i,j,:] = np.std(tmpmap)
-        return ians
+        r,c = X.shape
+        X+=np.random.rand(r,c)*1e-6
+        c1 = uniform_filter(X, window_size, mode='reflect')
+        c2 = uniform_filter(X*X, window_size, mode='reflect')
+        return np.sqrt(c2 - c1*c1)
 
     def _sub2ind(self, arraySize, dim0Sub, dim1Sub, dim2Sub):
         """
@@ -423,9 +422,8 @@ class UR5(object):
         for object_idx in range(self.cubenum):
             file_content_curr_object = file_content[object_idx].split()
             self.obj_order.append(file_content_curr_object[0])
-            self.obj_colors.append([float(file_content_curr_object[1]),float(file_content_curr_object[2]),float(file_content_curr_object[3])])
-            self.obj_positions.append([float(file_content_curr_object[4]),float(file_content_curr_object[5]),float(file_content_curr_object[6])])
-            self.obj_orientations.append([float(file_content_curr_object[7]),float(file_content_curr_object[8]),float(file_content_curr_object[9])])
+            self.obj_positions.append([float(file_content_curr_object[1]),float(file_content_curr_object[2]),float(file_content_curr_object[3])])
+            self.obj_orientations.append([float(file_content_curr_object[4]),float(file_content_curr_object[5]),float(file_content_curr_object[6])])
         fs.close()
         for j in range(self.cubenum):
             i=int(self.obj_order[j])

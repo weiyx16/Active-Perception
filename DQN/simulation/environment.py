@@ -105,7 +105,7 @@ class Camera(object):
                                [0, fy, v0],
                                [0, 0, 1]])
     
-    def _bg_init(self):
+    def bg_init(self):
         """
             -- use this function to save background RGB and Depth in the beginning
             -- it is used for the post process of affordance map
@@ -495,10 +495,11 @@ class DQNEnvironment(object):
         self.ur5 = UR5()
         self.ur5.connect()
         self.ur5.ankleinit()
+        self.ur5_location = self.ur5.get_position()
         # initial the camera in simulation
         self.clientID = self.ur5.get_clientID()
         self.camera = Camera(self.clientID, self.Lua_PATH)
-        self.camera._bg_init()
+        self.camera.bg_init()
 
         self.terminal = False
         self.reward = 0
@@ -524,7 +525,7 @@ class DQNEnvironment(object):
         self.screen, self.local_afford_past, self.location_2d = self.camera.local_patch(self.index, (self.screen_height, self.screen_width))
         self.local_afford_new = self.local_afford_past
         self.terminal = self.ifterminal()
-        return self.screen, 0, -1, self.terminal
+        return self.screen, 0., -1, self.terminal
 
     def close(self):
         """
@@ -559,13 +560,56 @@ class DQNEnvironment(object):
         """
             Use two affordance map to calculate the reward
         """
-        pass
+        self.metric = self.reward_metric(self.local_afford_new)
+        if (self.metric - self.reward_metric(self.local_afford_past)) > 0. :
+            return 1.
+        else:
+            return -1.
 
     def ifterminal(self):
         """
             Use the self.local_afford_new to judge if terminal
         """
-        pass
+        return self.metric > 0.7
+
+    def reward_metric(self, afford_map):
+        """
+            -- calculate the metric on a single affordance map
+            -- for now we weight three values() 
+            1. distance between two peaks in the local patch
+            2. flatten level of the center peaks
+            3. the value of the center peaks
+        """
+
+        half_screen = self.screen_height // 2
+        peaklocation = []
+        rr = 2
+        peakjudge = 0.5
+
+        # define local peak as the maximum num in area with radius = rr
+        peaknum = 0
+        for i in range(rr,self.screen_height-rr-1):
+            for j in range(rr,self.screen_width-rr-1):
+                if afford_map[i,j] == np.max(afford_map[i-rr:i+rr+1,j-rr:j+rr+1]) and afford_map[i,j] > peakjudge:
+                    peaknum += 1
+                    peaklocation.append((i,j))
+        
+        peak_dis= 0.
+        for i in range(0,peaknum):
+            peak_dis += ((peaklocation[i][0]-half_screen) **2 + (peaklocation[i][1]-half_screen) **2) **0.5
+        if peaknum == 0:
+            reg_peak_dis = 0
+        else:
+            avg_peak_dis = peak_dis / peaknum
+            reg_peak_dis = avg_peak_dis * 1.414 / self.screen_height
+
+        center_value = afford_map[half_screen][half_screen]
+        affmax = center_value + np.zeros(afford_map.shape)
+        flatten = np.sum((affmax - afford_map) **2)/(afford_map.size - 1)
+
+        metric = 0.4*(1-reg_peak_dis) + 0.4*flatten + 0.2*center_value
+
+        return metric
 
     def action2ur5(self, action):
         """
@@ -578,20 +622,19 @@ class DQNEnvironment(object):
         relate_local = list(idx[0:2])
         ori_depth_idx = np.unravel_index(int(idx[2]), (8,2))
         ori = ori_depth_idx[0] * 360. / 8.
-        push_depth = ori_depth_idx[1] * 0.02 # choose in two depth 0 or 0.02 (deeper than the pixel depth)
-        push_dis = self.screen_height // 4 # fix the push distance in 32 pixel 
+        push_depth = ori_depth_idx[1] * 0.02 # choose in two depth 0 or 0.02 (deeper than the pixel depth) TODO:
+        push_dis = self.screen_height // 4 # fix the push distance in 32 pixel TODO:
 
         # seems the output of the u-net is the same size of input so we need to resize the output idx
         relate_local = (np.asarray(relate_local) + 1.0) * self.screen_height / 96 - 1.0
         relate_local = np.round(relate_local)
-        real_local = relate_local
-        real_local[0] = self.location_2d[0] + relate_local[0] - self.screen_height // 2
-        real_local[1] = self.location_2d[1] + relate_local[1] - self.screen_width // 2
-
+        real_local = self.location_2d + relate_local - self.screen_height // 2
+        
+        # -> to the new push point with dest ori and depth
         real_dest = real_local
         real_dest[0] = real_local[0] + push_dis * math.cos(ori*self.EDG2RAD)
         real_dest[1] = real_local[1] + push_dis * math.sin(ori*self.EDG2RAD)
         real_dest = np.round(real_dest)
 
         # from pixel coor to real ur5 coor
-        return self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5.get_position, push_depth)
+        return self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5_location, push_depth)

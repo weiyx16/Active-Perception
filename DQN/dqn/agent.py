@@ -60,7 +60,7 @@ class Agent(BaseModel):
             # 1. predict
             action = self.predict(self.history.get())
             # 2. act
-            # notice the action is in [0, 48*48*16-1]
+            # notice the action is in [0, 96*96*16-1]
             screen, reward, terminal = self.env.act(action, is_training=True)
             # 3. observe & store
             self.observe(screen, reward, action, terminal)
@@ -496,7 +496,6 @@ class Agent(BaseModel):
         self._saver = tf.train.Saver(self.w.values() + [self.step_op], max_to_keep = 10, keep_checkpoint_every_n_hours=1.0)
         #　这个saver会覆盖base model里生成的saver
 
-        # What happened? TODO: if none? (just from the initial)
         self.load_model()
         self.update_target_q_network()
 
@@ -563,8 +562,7 @@ class Agent(BaseModel):
         for idx in range(n_episode):
             print("="*30)
             print(" [*] Test Episode %d" %idx, " begins ")
-            # TODO: env start feedback
-            # screen, reward, action, terminal = self.env.new_random_game()
+            screen, reward, action, terminal = self.env.new_scene()
             current_reward = 0
 
             # initial add
@@ -576,8 +574,7 @@ class Agent(BaseModel):
                 # 1. predict
                 action = self.predict(self.history.get(), test_ep)
                 # 2. act
-                # TODO: Get the feedback
-                # screen, reward, terminal = self.env.act(action, is_training=False)
+                screen, reward, terminal = self.env.act(action, is_training=False)
                 # 3. observe
                 self.history.add(screen)
 

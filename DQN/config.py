@@ -55,7 +55,8 @@ class DQNConfig(object):
         self.ckpt_dir = r'../checkpoint'
         self.model_dir = r'../model'
         self.is_train = True
-
+        self.end_reward = 0.7
+        
         if FLAGS['use_gpu'] == False:
             self.cnn_format = 'NHWC'
         else:

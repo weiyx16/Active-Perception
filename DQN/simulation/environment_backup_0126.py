@@ -1,5 +1,7 @@
 import sys
 import os
+sys.path.append(os.getcwd())
+
 import time
 import numpy.random as random
 import numpy as np
@@ -22,6 +24,8 @@ except:
     print ('--------------------------------------------------------------')
     print ('')
 
+# TODO: what's the range of color/depth for each network (like affordance map network/ post process/ DQN?)
+
 class Camera(object):
     """
         # kinect camera in simulation
@@ -33,13 +37,12 @@ class Camera(object):
         self.RAD2EDG = 180 / math.pi
         self.EDG2RAD = math.pi / 180
         self.Save_IMG = True
-        self.Save_PATH_COLOR = r'./color'
-        self.Save_PATH_DEPTH = r'./depth'
-        self.Save_PATH_RES = r'./afford_h5'
+        self.Save_PATH_COLOR = r'./color/'
+        self.Save_PATH_DEPTH = r'./depth/'
+        self.Save_PATH_RES = r'./afford_h5/'
         self.Lua_PATH = Lua_PATH
-        self.Dis_FAR = 10
-        self.depth_scale = 1000
-        # self.INT16 = 65535
+        self.Dis_FAR = 10 #TODO:
+        self.INT16 = 65535
         self.Img_WIDTH = 512
         self.Img_HEIGHT = 424
         self.theta = 70
@@ -50,10 +53,6 @@ class Camera(object):
         self._setup_sim_camera()
         self.bg_color = np.empty((3, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
         self.bg_depth = np.empty((1, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
-
-    def _mkdir_save(self, path_name):
-        if not os.path.exists(path_name):
-            os.mkdir(path_name)
 
     def _euler2rotm(self,theta):
         """
@@ -113,8 +112,6 @@ class Camera(object):
             -- it is used for the post process of affordance map
         """
         self.bg_depth, self.bg_color = self.get_camera_data()
-        self.bg_color /= 255.0
-        self.bg_depth /= 10000
 
     def get_camera_data(self):
         """
@@ -137,9 +134,13 @@ class Camera(object):
         depth_img = np.array(depth_buffer)
         depth_img.shape = (resolution[1], resolution[0])
         depth_img = np.fliplr(depth_img)
+        # zNear = 0.01
+        # zFar = 10
+        # depth_img = depth_img * (zFar - zNear) + zNear
+        # TODO: ? What's the range?
         depth_img[depth_img < 0] = 0
-        depth_img[depth_img > 1] = 0.9999
-        depth_img = depth_img * self.Dis_FAR * self.depth_scale
+        depth_img[depth_img > 1] = 1
+        depth_img = depth_img * self.INT16
         return depth_img, color_img
 
     def save_image(self, cur_depth, cur_color, img_idx):
@@ -147,10 +148,10 @@ class Camera(object):
             -- Save Color&Depth images
         """
         img = Image.fromarray(cur_color.astype('uint8')).convert('RGB')
-        img_path = os.path.join(self.Save_PATH_COLOR, str(img_idx) + '_Rgb.png')
+        img_path = self.Save_PATH_COLOR + str(img_idx) + '_Rgb.png'
         img.save(img_path)
         depth_img = Image.fromarray(cur_depth.astype(np.uint32),mode='I')
-        depth_path = os.path.join(self.Save_PATH_DEPTH, str(img_idx) + '_Depth.png')
+        depth_path = self.Save_PATH_DEPTH + str(img_idx) + '_Depth.png'
         depth_img.save(depth_path)
 
         return depth_path, img_path
@@ -193,7 +194,7 @@ class Camera(object):
         cur_depth_path, cur_img_path = self.save_image(cur_depth, cur_color, img_idx)
         
         # feed this image into affordance map network and get the h5 file
-        cur_res_path = os.path.join(self.Save_PATH_RES, str(img_idx) + '_results.h5')
+        cur_res_path = self.Save_PATH_RES + str(img_idx) + '_results.h5'
         affordance_cmd = 'th ' + self.Lua_PATH + ' -imgColorPath ' + cur_img_path + \
                         ' -imgDepthPath ' + cur_depth_path + ' -resultPath ' + cur_res_path
         try:
@@ -235,11 +236,13 @@ class Camera(object):
             # convert from the afford_model from matlab to python
         """
         cur_color = cur_color / 255.0
-        cur_depth = cur_depth / 10000
-        foregroundMaskColor = np.logical_not(np.sum((np.abs(cur_color - self.bg_color) < 0.3), axis = 2) == 3)
+        rgb_sim = np.sum((np.abs(cur_color - self.bg_color) < 0.3), axis = 2)
+        foregroundMaskColor = np.logical_not(rgb_sim == 3)
+
         backgroundDepth_mask = np.zeros(self.bg_depth.shape, dtype = bool)
         backgroundDepth_mask[self.bg_depth!=0] = True
         foregroundMaskDepth = backgroundDepth_mask & (np.abs(cur_depth-self.bg_depth) > 0.02)
+        # TODO: what's the true depth range???????
         foregroundMask = (foregroundMaskColor | foregroundMaskDepth)
 
         x = np.linspace(0,self.Img_WIDTH-1,self.Img_WIDTH)
@@ -259,6 +262,16 @@ class Camera(object):
             tmp[i] = foregroundNormals[i]
         foregroundNormals = np.nan_to_num(tmp[:,0:3])
 
+        sensorCenter = np.array([0,0,0])
+        for k in range(0,inputPoints.shape[1]):
+            p1 = sensorCenter - np.array([inputPoints[0,k],inputPoints[1,k],inputPoints[2,k]])
+            p2 = np.array([foregroundNormals[k,0],foregroundNormals[k,1],foregroundNormals[k,2]])
+            angle = np.arctan2(np.linalg.norm(np.cross(p1,p2)),np.transpose(np.dot(p1,p2)))
+            if angle > math.pi/2 or angle < -math.pi/2:
+                pass
+            else:
+                foregroundNormals[k,:] = -foregroundNormals[k,:]
+
         pixX = np.rint(np.dot(inputPoints[0,:],self.intri[0,0])/inputPoints[2,:]+self.intri[0,2])
         pixY = np.rint(np.dot(inputPoints[1,:],self.intri[1,1])/inputPoints[2,:]+self.intri[1,2])
 
@@ -269,13 +282,15 @@ class Camera(object):
         tmp = np.ones(pixY.shape)
         tmp = tmp.astype(np.int)
 
-        # TODO: what arrarsize
-        surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,0]
-        surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,2*tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,1]
-        surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,3*tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,2]
-    
+        surfaceNormalsMap.ravel()[self._sub2ind(surfaceNormalsMap.shape,pixY,pixX,tmp-1)] = foregroundNormals[:,0]
+        surfaceNormalsMap.ravel()[self._sub2ind(surfaceNormalsMap.shape,pixY,pixX,2*tmp-1)] = foregroundNormals[:,1]
+        surfaceNormalsMap.ravel()[self._sub2ind(surfaceNormalsMap.shape,pixY,pixX,3*tmp-1)] = foregroundNormals[:,2]
+        
         # filter the affordance map
-        tmp = self._window_stdev(surfaceNormalsMap,25)
+        tmp = np.zeros(surfaceNormalsMap.shape)
+        tmp[:,:,0] = self._window_stdev(surfaceNormalsMap[:,:,0],25)*25*25/(25*25-1)
+        tmp[:,:,1] = self._window_stdev(surfaceNormalsMap[:,:,1],25)*25*25/(25*25-1)
+        tmp[:,:,2] = self._window_stdev(surfaceNormalsMap[:,:,2],25)*25*25/(25*25-1)
         # accelarate the filter
         meanStdNormals = np.mean(tmp,axis = 2)
 
@@ -290,17 +305,11 @@ class Camera(object):
         """
             std filt in np
         """
-        rw = window_size
-        k = ((rw*rw)/(rw*rw-1))**(0.5)
-        r,c,d = X.shape
-        new = np.zeros(X.shape)
-        for index in range(0,d):
-            XX=X[:,:,index]
-            XX+=np.random.rand(r,c)*1e-6
-            c1 = uniform_filter(XX, window_size, mode='reflect')
-            c2 = uniform_filter(XX*XX, window_size, mode='reflect')
-            new[:,:,index] = np.sqrt(c2 - c1*c1)
-        return k*new
+        r,c = X.shape
+        X+=np.random.rand(r,c)*1e-6
+        c1 = uniform_filter(X, window_size, mode='reflect')
+        c2 = uniform_filter(X*X, window_size, mode='reflect')
+        return np.sqrt(c2 - c1*c1)
 
     def _sub2ind(self, arraySize, dim0Sub, dim1Sub, dim2Sub):
         """
@@ -315,7 +324,7 @@ class Camera(object):
         ne = cloud.make_NormalEstimation()
         tree = cloud.make_kdtree()
         ne.set_SearchMethod(tree)
-        ne.set_RadiusSearch(0.0001)  #this parameter influence the speed
+        ne.set_RadiusSearch(0.001)  #this parameter influence the speed
         cloud_normals = ne.compute()
         return cloud_normals
 
@@ -323,7 +332,7 @@ class Camera(object):
         """
             from pixel u,v and correspondent depth z -> coor in ur5 coordinate (x,y,z)
         """
-        depth = self.cur_depth[u][v] / self.depth_scale
+        depth = self.cur_depth[u][v] / self.INT16 * self.Dis_FAR
         x = depth*(u - self.intri[0][2]) / self.intri[0][0]
         y = depth*(v - self.intri[1][2]) / self.intri[1][1]
         camera_coor = np.array([x, y, depth - push_depth])
@@ -479,7 +488,6 @@ class DQNEnvironment(object):
     """
     def __init__(self, config):
         self.Lua_PATH = config.Lua_PATH
-        self.end_reward = config.end_reward
         self.EDG2RAD = math.pi / 180
         # initial the ur5 arm in simulation
         self.ur5 = UR5()
@@ -505,9 +513,9 @@ class DQNEnvironment(object):
     def new_scene(self):
         """
             Random initial the scene
-            # scene index is from 0~2
+            # scene index is from 0~9
         """
-        scene_num = random.randint(0, 3)
+        scene_num = random.randint(0, 10)
         self.ur5.cubeinit(scene_num)
         # return the camera_data
         self.index = (self.index + 1)% self.save_size
@@ -542,11 +550,11 @@ class DQNEnvironment(object):
         # location_2d stores the maximum affordance value coor know in the scene
         self.local_afford_past = self.local_afford_new
         self.screen, self.local_afford_new, self.location_2d = self.camera.local_patch(self.index, (self.screen_height, self.screen_width))
-        self.reward = self.calc_reward()
+        self.reward = self.calcreward()
         self.terminal = self.ifterminal()
         return self.screen, self.reward, self.terminal
 
-    def calc_reward(self):
+    def calcreward(self):
         """
             Use two affordance map to calculate the reward
         """
@@ -560,7 +568,7 @@ class DQNEnvironment(object):
         """
             Use the self.local_afford_new to judge if terminal
         """
-        return self.metric > self.end_reward
+        return self.metric > 0.7
 
     def reward_metric(self, afford_map):
         """

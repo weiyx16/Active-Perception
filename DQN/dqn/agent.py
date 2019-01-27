@@ -194,13 +194,16 @@ class Agent(BaseModel):
         # if terminal -> then reward
         # if not -> reward + decay * max (q)
         target_q_t = (1. - terminal) * self.discount * max_q_t_plus_1 + reward
-        _, q_t, loss, summary_str = self.sess.run([self.optim, self.q_flat, self.loss, self.q_summary], {
+
+        # TODO: I remove the q_summary for it is so slow and I don't know why now.
+        # _, q_t, loss, summary_str = self.sess.run([self.optim, self.q_flat, self.loss, self.q_summary], {
+        _, q_t, loss = self.sess.run([self.optim, self.q_flat, self.loss], {
             self.target_q_t: target_q_t,
             self.action: action,
             self.s_t: s_t, # 把s_t喂进去是为了得到q_flat，这样才能优化
             self.learning_rate_step: self.step,})
-
-        self.writer.add_summary(summary_str, self.step)
+        
+        # self.writer.add_summary(summary_str, self.step)
         self.total_loss += loss
         self.total_q += q_t.mean()
         self.update_count += 1 # 记录优化次数
@@ -213,6 +216,7 @@ class Agent(BaseModel):
             Build the Deep Q-table network
             16 U-net based
         """
+        print(' [*] Build Deep Q-Network')
         self.w_all = [] # a list to save dicts which save each layer weights and bias for estimation network
         self.t_w_all = [] # a list to save dicts which save each layer weights and bias for reality network
 
@@ -242,7 +246,7 @@ class Agent(BaseModel):
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_2')
                 # l2 = None*124*124*128
 
-                self.l3 = max_pool(self.l2, [2, 2], [1, 1], self.cnn_format, name=idx +'_m1')
+                self.l3 = max_pool(self.l2, [2, 2], [2, 2], self.cnn_format, name=idx +'_m1')
                 # l3 = None*62*62*128
 
                 # downsample_2 (adjusted)
@@ -250,7 +254,7 @@ class Agent(BaseModel):
                     256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l2_1')
                 # l4 = None*60*60*256
 
-                self.l5 = max_pool(self.l4, [2, 2], [1, 1], self.cnn_format, name=idx +'_m2')
+                self.l5 = max_pool(self.l4, [2, 2], [2, 2], self.cnn_format, name=idx +'_m2')
                 # l5 = None*30*30*256
                                 
                 # Bottom layer
@@ -279,7 +283,7 @@ class Agent(BaseModel):
                 self.l11, self.w['U2_w'] = deconv2d(self.l10, 
                     [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U2')
                 # l11 = None*100*100*128       
-                       
+
                 # Cascading (l2, l11)
                 self.l12 = crop_and_concat(self.l2, self.l11, self.cnn_format, name=idx+'_CrConc2')
                 # l12 = None*100*100*256
@@ -301,9 +305,9 @@ class Agent(BaseModel):
                     self.q_all = self.q
                 else:
                     if self.cnn_format == 'NHWC':
-                        self.q_all = tf.concat(3, [self.q_all, self.q])
+                        self.q_all = tf.concat([self.q_all, self.q], 3)
                     else:
-                        self.q_all = tf.concat(1, [self.q_all, self.q])
+                        self.q_all = tf.concat([self.q_all, self.q], 1)
                 self.w_all.append(self.w)
 
             # q_all = None*96*96*16
@@ -312,8 +316,9 @@ class Agent(BaseModel):
             # q_flat = None*(96^2*16)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
             # Find every max q_flat -> action index for each sample in batch
-            self.q_action = tf.argmax(self.q_flat, dimension=1)
-
+            self.q_action = tf.argmax(self.q_flat, axis=1)
+        
+            """
             # for show in tf board
             q_summary = []
             # average q value for each action over all the samples
@@ -322,6 +327,8 @@ class Agent(BaseModel):
                 # idx is range in action size (pixel number)
                 q_summary.append(tf.summary.histogram('q/%s' % idx, avg_q[idx]))
                 self.q_summary = tf.summary.merge(q_summary, 'q_summary')
+            """
+        print(' [*] Build Q-Evaluate Scope')
 
         # target network
         # The structure is the same with eval network
@@ -346,7 +353,7 @@ class Agent(BaseModel):
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_2')
                 # l2 = None*124*124*128
 
-                self.target_l3 = max_pool(self.target_l2, [2, 2], [1, 1], self.cnn_format, name=idx +'_target_m1')
+                self.target_l3 = max_pool(self.target_l2, [2, 2], [2, 2], self.cnn_format, name=idx +'_target_m1')
                 # l3 = None*62*62*128
 
                 # downsample_2 (adjusted)
@@ -354,7 +361,7 @@ class Agent(BaseModel):
                     256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l2_1')
                 # l4 = None*60*60*256
 
-                self.target_l5 = max_pool(self.target_l4, [2, 2], [1, 1], self.cnn_format, name=idx +'_target_m2')
+                self.target_l5 = max_pool(self.target_l4, [2, 2], [2, 2], self.cnn_format, name=idx +'_target_m2')
                 # l5 = None*30*30*256
                                 
                 # Bottom layer
@@ -405,9 +412,9 @@ class Agent(BaseModel):
                     self.target_q_all = self.target_q
                 else:
                     if self.cnn_format == 'NHWC':
-                        self.target_q_all = tf.concat(3, [self.target_q_all, self.target_q])
+                        self.target_q_all = tf.concat([self.target_q_all, self.target_q], 3)
                     else:
-                        self.target_q_all = tf.concat(1, [self.target_q_all, self.target_q])
+                        self.target_q_all = tf.concat([self.target_q_all, self.target_q], 1)
                 self.t_w_all.append(self.t_w)
 
             shape = self.target_q_all.get_shape().as_list()
@@ -418,12 +425,13 @@ class Agent(BaseModel):
             # TODO: What's there two stuffs for????
             self.target_q_idx = tf.placeholder('int32', [None, None], 'outputs_idx')
             self.target_q_with_idx = tf.gather_nd(self.target_q_flat, self.target_q_idx)
+        print(' [*] Build Q-Target Scope')
 
         # Used to Set target network params from estimation network (let the t_w_input = w, then assign t_w with t_w_input)
         with tf.variable_scope('pred_to_target'):
             self.t_w_input_all = []
             self.t_w_assign_op_all = []
-            for i in range(16)
+            for i in range(16):
                 self.t_w_input = {}
                 self.t_w_assign_op = {}
                 self.t_w = self.t_w_all[i]
@@ -432,9 +440,10 @@ class Agent(BaseModel):
                     # t_w_input <= w_value
                     self.t_w_input[name] = tf.placeholder('float32', self.t_w[name].get_shape().as_list(), name=name)
                     self.t_w_assign_op[name] = self.t_w[name].assign(self.t_w_input[name])
+
                 self.t_w_input_all.append(self.t_w_input)
                 self.t_w_assign_op_all.append(self.t_w_assign_op)
-
+        print(' [*] Build Weights Transform Scope')
 
         # optimizer
         with tf.variable_scope('optimizer'):
@@ -444,7 +453,8 @@ class Agent(BaseModel):
 
             # convert to batch_size * action_size matrix
             # e.g. batch = 3, action = 4 init = [3,2,3]
-            # [0,0,0,1] [0,0,1,0] [0,0,0,1] -> stands for choosing the 4-th/3-rd/4-th action each
+            # after one-hot -> [0,0,0,1] [0,0,1,0] [0,0,0,1] 
+            # -> stands for choosing the 4-th/3-rd/4-th action each
             # although here the batch size is not assigned (none)
             action_one_hot = tf.one_hot(self.action, self.action_num, 1.0, 0.0, name='action_one_hot')
             # Only set the chosen action to have value, with others = none
@@ -457,6 +467,7 @@ class Agent(BaseModel):
             self.global_step = tf.Variable(0, trainable=False)
 
             self.loss = tf.reduce_mean(clipped_error(self.delta), name='loss')
+            # print(self.loss.shape)
             self.learning_rate_step = tf.placeholder('int64', None, name='learning_rate_step')
             # 目前设置minimum和initial相等，所以没有learning rate decay
             self.learning_rate_op = tf.maximum(self.learning_rate_minimum,
@@ -466,10 +477,11 @@ class Agent(BaseModel):
                     self.learning_rate_decay_step,
                     self.learning_rate_decay,
                     staircase=True))
-            # TODO: We can change the momentum and epsilon params
+            # TODO:now We can change the momentum and epsilon params
             self.optim = tf.train.RMSPropOptimizer(
                 self.learning_rate_op, momentum=0.95, epsilon=0.01).minimize(self.loss)
-        
+        print(' [*] Build Optimize Scope')
+
         # display all the params in the tfboard by summary
         with tf.variable_scope('summary'):
             # save every Mini_batch GD
@@ -490,7 +502,7 @@ class Agent(BaseModel):
                 self.summary_ops[tag]  = tf.summary.histogram(tag, self.summary_placeholders[tag])
 
             self.writer = tf.summary.FileWriter('../logs', self.sess.graph)
-
+        print(' [*] Build Summary Scope')
         tf.global_variables_initializer().run()
 
         self._saver = tf.train.Saver(self.w.values() + [self.step_op], max_to_keep = 10, keep_checkpoint_every_n_hours=1.0)

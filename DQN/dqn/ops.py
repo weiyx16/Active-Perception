@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 
 def clipped_error(x):
     """
@@ -44,7 +45,7 @@ def conv2d(x,
 
 def max_pool(x, 
             kernel_size = [2, 2],
-            stride = [1, 1],
+            stride = [2, 2],
             data_format='NHWC',
             padding='VALID', 
             name = 'maxpool'):
@@ -80,15 +81,14 @@ def deconv2d(x,
         if data_format == 'NCHW':
             stride = [1, 1, stride[0], stride[1]]
             # Notice the third params is the channel number that is -> C
-            kernel_shape = [kernel_size[0], kernel_size[1], x.get_shape()[1], input_shape[1]//2]
-            output_shape = tf.stack([input_shape[0], input_shape[1]//2, input_shape[2]*2, input_shape[3]*2]) 
-
+            kernel_shape = [kernel_size[0], kernel_size[1], input_shape[1]//2, input_shape[1]] 
+            output_shape = tf.stack([tf.shape(x)[0], input_shape[1]//2, input_shape[2]*2, input_shape[3]*2])
         elif data_format == 'NHWC':
             stride = [1, stride[0], stride[1], 1]
-            kernel_shape = [kernel_size[0], kernel_size[1], x.get_shape()[-1], input_shape[3]//2]
-            output_shape = tf.stack([input_shape[0], input_shape[1]*2, input_shape[2]*2, input_shape[3]//2]) 
-
+            kernel_shape = [kernel_size[0], kernel_size[1], input_shape[3]//2, input_shape[-1]]
+            output_shape = tf.stack([tf.shape(x)[0], input_shape[1]*2, input_shape[2]*2, input_shape[3]//2])
         w = tf.get_variable('w', kernel_shape, tf.float32, initializer=initializer)
+        
         out = tf.nn.conv2d_transpose(x, w, output_shape, stride, padding, data_format=data_format)
         
         if activation_fn != None:
@@ -107,17 +107,17 @@ def crop_and_concat(down_sample, up_sample, data_format = 'NHWC', name='crop_and
             offsets = [0, 0, (down_sample_shape[2] - up_sample_shape[2]) // 2, (down_sample_shape[3] - up_sample_shape[3]) // 2]
             size = [-1, -1, up_sample_shape[2], up_sample_shape[3]]
             down_sample_crop = tf.slice(down_sample, offsets, size)
-            return tf.concat(1, [down_sample_crop, up_sample])
+            return tf.concat([down_sample_crop, up_sample], 1)
+            
         elif data_format == 'NHWC':
             offsets = [0, (down_sample_shape[1] - up_sample_shape[1]) // 2, (down_sample_shape[2] - up_sample_shape[2]) // 2, 0]
             size = [-1, up_sample_shape[1], up_sample_shape[2], -1]
             down_sample_crop = tf.slice(down_sample, offsets, size)
-            return tf.concat(3, [down_sample_crop, up_sample])
+            return tf.concat([down_sample_crop, up_sample], 3)
 
 def linear(input_, output_size, stddev=0.02, bias_start=0.0, activation_fn=None, name='linear'):
     """
         Dense layer with self-defined params
-        # TODO: We can add initializer function params in the input params
     """
     # shape is batch_size * all_params_list
     shape = input_.get_shape().as_list()

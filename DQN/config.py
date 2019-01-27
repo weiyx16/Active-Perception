@@ -34,7 +34,7 @@ class DQNConfig(object):
         self.dueling = False
 
         self.test_step = 5 * self.scale
-        self._save_step = self.test_step * 10 # unused yet
+        # self.save_step = self.test_step * 10 # unused yet
 
         # ----------- Environment Params
         self.env_name = 'Act_Perc'
@@ -42,7 +42,7 @@ class DQNConfig(object):
         # In furthur case you can just use local infomation with 64*64 or 128*128 pixel.
         self.screen_width  = 128
         self.screen_height = 128
-
+        self.scene_num = 3
         self.max_reward = 1.
         self.min_reward = -1.
 
@@ -57,12 +57,12 @@ class DQNConfig(object):
         self.is_train = True
         self.end_reward = 0.7
         
-        if FLAGS['use_gpu'] == False:
+        if FLAGS.use_gpu == False:
             self.cnn_format = 'NHWC'
         else:
             self.cnn_format = 'NCHW'
 
-        if FLAGS['is_train'] == False:
+        if FLAGS.is_train == False:
             self.is_train = False
             
     def list_all_member(self):

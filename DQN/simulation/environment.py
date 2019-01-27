@@ -12,13 +12,14 @@ from scipy.ndimage.filters import uniform_filter
 import pcl
 
 try:
-    import vrep
+    from simulation.vrep import *
+    print('--- Successfully load vrep ---')
 except:
     print ('--------------------------------------------------------------')
-    print ('"vrep.py" could not be imported. This means very probably that')
-    print ('either "vrep.py" or the remoteApi library could not be found.')
+    print ('"py" could not be imported. This means very probably that')
+    print ('either "py" or the remoteApi library could not be found.')
     print ('Make sure both are in the same folder as this file,')
-    print ('or appropriately adjust the file "vrep.py"')
+    print ('or appropriately adjust the file "py"')
     print ('--------------------------------------------------------------')
     print ('')
 
@@ -33,9 +34,9 @@ class Camera(object):
         self.RAD2EDG = 180 / math.pi
         self.EDG2RAD = math.pi / 180
         self.Save_IMG = True
-        self.Save_PATH_COLOR = r'./color'
-        self.Save_PATH_DEPTH = r'./depth'
-        self.Save_PATH_RES = r'./afford_h5'
+        self.Save_PATH_COLOR = r'./simulation/color'
+        self.Save_PATH_DEPTH = r'./simulation/depth'
+        self.Save_PATH_RES = r'./simulation/afford_h5'
         self.Lua_PATH = Lua_PATH
         self.Dis_FAR = 10
         self.depth_scale = 1000
@@ -48,11 +49,15 @@ class Camera(object):
         self.Camera_DEPTH_NAME = r'kinect_depth'
         self.clientID = clientID
         self._setup_sim_camera()
-        self.bg_color = np.empty((3, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
-        self.bg_depth = np.empty((1, self.Img_HEIGHT, self.Img_WIDTH), dtype = np.float16)
+        self.bg_color = np.empty((self.Img_HEIGHT, self.Img_WIDTH ,3), dtype = np.float16)
+        self.bg_depth = np.empty((self.Img_HEIGHT, self.Img_WIDTH, 1), dtype = np.float16)
+
+        self._mkdir_save(self.Save_PATH_COLOR)
+        self._mkdir_save(self.Save_PATH_DEPTH)
+        self._mkdir_save(self.Save_PATH_RES)
 
     def _mkdir_save(self, path_name):
-        if not os.path.exists(path_name):
+        if not os.path.isdir(path_name):         
             os.mkdir(path_name)
 
     def _euler2rotm(self,theta):
@@ -80,12 +85,12 @@ class Camera(object):
             and set necessary parameter for camera
         """
         # Get handle to camera
-        _, self.cam_handle = vrep.simxGetObjectHandle(self.clientID, self.Camera_NAME, vrep.simx_opmode_oneshot_wait)
-        _, self.kinectRGB_handle = vrep.simxGetObjectHandle(self.clientID, self.Camera_RGB_NAME, vrep.simx_opmode_oneshot_wait)
-        _, self.kinectDepth_handle = vrep.simxGetObjectHandle(self.clientID, self.Camera_DEPTH_NAME, vrep.simx_opmode_oneshot_wait)
+        _, self.cam_handle = simxGetObjectHandle(self.clientID, self.Camera_NAME, simx_opmode_oneshot_wait)
+        _, self.kinectRGB_handle = simxGetObjectHandle(self.clientID, self.Camera_RGB_NAME, simx_opmode_oneshot_wait)
+        _, self.kinectDepth_handle = simxGetObjectHandle(self.clientID, self.Camera_DEPTH_NAME, simx_opmode_oneshot_wait)
         # Get camera pose and intrinsics in simulation
-        _, self.cam_position = vrep.simxGetObjectPosition(self.clientID, self.cam_handle, -1, vrep.simx_opmode_oneshot_wait)
-        _, cam_orientation = vrep.simxGetObjectOrientation(self.clientID, self.cam_handle, -1, vrep.simx_opmode_oneshot_wait)
+        _, self.cam_position = simxGetObjectPosition(self.clientID, self.cam_handle, -1, simx_opmode_oneshot_wait)
+        _, cam_orientation = simxGetObjectOrientation(self.clientID, self.cam_handle, -1, simx_opmode_oneshot_wait)
 
         self.cam_trans = np.eye(4,4)
         self.cam_trans[0:3,3] = np.asarray(self.cam_position)
@@ -99,30 +104,33 @@ class Camera(object):
         """
             Calculate the intrinstic parameters of camera
         """
-        fx = -self.Img_WIDTH/(2.0*self.Dis_FAR*math.tan(self.theta * self.EDG2RAD))
+        # ref: https://blog.csdn.net/zyh821351004/article/details/49786575
+        fx = -self.Img_WIDTH/(2.0 * math.tan(self.theta * self.EDG2RAD / 2.0))
         fy = fx
         u0 = self.Img_WIDTH / 2
         v0 = self.Img_HEIGHT / 2
         self.intri = np.array([[fx, 0, u0],
                                [0, fy, v0],
                                [0, 0, 1]])
-    
+
     def bg_init(self):
         """
             -- use this function to save background RGB and Depth in the beginning
             -- it is used for the post process of affordance map
         """
-        self.bg_depth, self.bg_color = self.get_camera_data()
-        self.bg_color /= 255.0
-        self.bg_depth /= 10000
+        # self.bg_depth, self.bg_color = self.get_camera_data()
+        # self.bg_color = np.asarray(self.bg_color) / 255.0
+        # self.bg_depth = np.asarray(self.bg_depth) / 10000
+        self.bg_depth = cv.imread('./simulation/bg/Bg_Depth.png', -1) / 10000
+        self.bg_color = cv.imread('./simulation/bg/Bg_Rgb.png') / 255.0
 
     def get_camera_data(self):
         """
             -- Read images data from vrep and convert into np array
         """
         # Get color image from simulation
-        res, resolution, raw_image = vrep.simxGetVisionSensorImage(self.clientID, self.kinectRGB_handle, 0, vrep.simx_opmode_oneshot_wait)
-        self._error_catch(res)
+        res, resolution, raw_image = simxGetVisionSensorImage(self.clientID, self.kinectRGB_handle, 0, simx_opmode_oneshot_wait)
+        # self._error_catch(res)
         color_img = np.array(raw_image, dtype=np.uint8)
         color_img.shape = (resolution[1], resolution[0], 3)
         color_img = color_img.astype(np.float)/255
@@ -132,14 +140,15 @@ class Camera(object):
         color_img = color_img.astype(np.uint8)
 
         # Get depth image from simulation
-        res, resolution, depth_buffer = vrep.simxGetVisionSensorDepthBuffer(self.clientID, self.kinectDepth_handle, vrep.simx_opmode_oneshot_wait)
-        self._error_catch(res)
+        res, resolution, depth_buffer = simxGetVisionSensorDepthBuffer(self.clientID, self.kinectDepth_handle, simx_opmode_oneshot_wait)
+        # self._error_catch(res)
         depth_img = np.array(depth_buffer)
         depth_img.shape = (resolution[1], resolution[0])
         depth_img = np.fliplr(depth_img)
         depth_img[depth_img < 0] = 0
         depth_img[depth_img > 1] = 0.9999
         depth_img = depth_img * self.Dis_FAR * self.depth_scale
+        self.cur_depth = depth_img
         return depth_img, color_img
 
     def save_image(self, cur_depth, cur_color, img_idx):
@@ -159,9 +168,9 @@ class Camera(object):
         """
             -- Deal with error unexcepted
         """
-        if res == vrep.simx_return_ok:
+        if res == simx_return_ok:
             print ("--- Image Exist!!!")
-        elif res == vrep.simx_return_novalue_flag:
+        elif res == simx_return_novalue_flag:
             print ("--- No image yet")
         else:
             print ("--- Error Raise")
@@ -176,7 +185,7 @@ class Camera(object):
         res = h['results']
         res = np.array(res)
         res = res[0,1,:,:]
-        resresize = 255.0 * cv.resize(res, (self.Img_WIDTH, self.Img_HEIGHT), interpolation=cv.INTER_CUBIC)
+        resresize = cv.resize(res, (self.Img_WIDTH, self.Img_HEIGHT), interpolation=cv.INTER_CUBIC)
         resresize[np.where(resresize>1)] = 0.9999
         resresize[np.where(resresize<0)] = 0
         return resresize
@@ -189,7 +198,6 @@ class Camera(object):
         """
         # first get the current img data first
         cur_depth, cur_color = self.get_camera_data()
-        self.cur_depth = cur_depth
         cur_depth_path, cur_img_path = self.save_image(cur_depth, cur_color, img_idx)
         
         # feed this image into affordance map network and get the h5 file
@@ -199,19 +207,23 @@ class Camera(object):
         try:
             os.system(affordance_cmd)
         except:
-            print('!!!!!!!!!!!!!!!!!!!!!!!!  Error occurred during creating affordance map')
-            exit()
+            raise Exception(' [!] !!!!!!!!!!!  Error occurred during calling affordance map')
         
         # get the initial affordance map from h5 file
-        cur_afford = self.hdf2affimg(cur_res_path)
+        if os.path.isfile(cur_res_path):
+            cur_afford = self.hdf2affimg(cur_res_path)
+        else:
+            # Use this to catch the exception for torch itself
+            raise Exception(' [!] !!!!!!!!!!!  Error occurred during creating affordance map')          
 
         # postprocess the affordance map
         post_afford = self._postproc_affimg(cur_color, cur_depth, cur_afford)
-        location = np.where(post_afford == np.nanmax(post_afford))
-        location_2d = np.transpose(np.array(location))[0]
+        location = np.where(post_afford == np.max(post_afford))
 
+        location_2d = np.transpose(np.array(location))[0]
+        print(location_2d)
         # according to the affordance map -> get the local patch with size of 4*128*128
-        return self._get_patch(location_2d, cur_color, cur_depth, patch_size)
+        return self._get_patch(location_2d, cur_color, cur_depth, post_afford, patch_size)
 
     def _get_patch(self, location_2d, cur_color, cur_depth, post_afford, size=(128,128)):
         """
@@ -236,10 +248,11 @@ class Camera(object):
         """
         cur_color = cur_color / 255.0
         cur_depth = cur_depth / 10000
-        foregroundMaskColor = np.logical_not(np.sum((np.abs(cur_color - self.bg_color) < 0.3), axis = 2) == 3)
+        temp = (np.abs(cur_color - self.bg_color) < 0.3)
+        foregroundMaskColor = np.sum(temp, axis = 2) != 3
         backgroundDepth_mask = np.zeros(self.bg_depth.shape, dtype = bool)
         backgroundDepth_mask[self.bg_depth!=0] = True
-        foregroundMaskDepth = backgroundDepth_mask & (np.abs(cur_depth-self.bg_depth) > 0.02)
+        foregroundMaskDepth = backgroundDepth_mask & (np.abs(cur_depth-self.bg_depth) > 0.005)
         foregroundMask = (foregroundMaskColor | foregroundMaskDepth)
 
         x = np.linspace(0,self.Img_WIDTH-1,self.Img_WIDTH)
@@ -249,27 +262,26 @@ class Camera(object):
         camY = (pixY-self.intri[1,2])*cur_depth/self.intri[1,1]
         camZ = cur_depth
         validDepth = foregroundMask & (camZ != 0) # only points with valid depth and within foreground mask
+
         inputPoints = [camX[validDepth],camY[validDepth],camZ[validDepth]]
         inputPoints = np.asarray(inputPoints,dtype=np.float32)
         foregroundPointcloud = pcl.PointCloud(np.transpose(inputPoints))
         foregroundNormals = self._surface_normals(foregroundPointcloud)
-
+        
         tmp = np.zeros((foregroundNormals.size, 4), dtype=np.float16)
         for i in range(foregroundNormals.size):
             tmp[i] = foregroundNormals[i]
         foregroundNormals = np.nan_to_num(tmp[:,0:3])
-
         pixX = np.rint(np.dot(inputPoints[0,:],self.intri[0,0])/inputPoints[2,:]+self.intri[0,2])
         pixY = np.rint(np.dot(inputPoints[1,:],self.intri[1,1])/inputPoints[2,:]+self.intri[1,2])
 
         surfaceNormalsMap = np.zeros(cur_color.shape)
-
+        arraySize = surfaceNormalsMap.shape
         pixX = pixX.astype(np.int)
         pixY = pixY.astype(np.int)
         tmp = np.ones(pixY.shape)
         tmp = tmp.astype(np.int)
 
-        # TODO: what arrarsize
         surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,0]
         surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,2*tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,1]
         surfaceNormalsMap.ravel()[np.ravel_multi_index((pixY,pixX,3*tmp-1), dims=arraySize, order='C')] = foregroundNormals[:,2]
@@ -278,14 +290,12 @@ class Camera(object):
         tmp = self._window_stdev(surfaceNormalsMap,25)
         # accelarate the filter
         meanStdNormals = np.mean(tmp,axis = 2)
-
-        normalBasedSuctionScores = np.ones(meanStdNormals.shape) - meanStdNormals / np.nanmax(meanStdNormals)
+        normalBasedSuctionScores = 1 - meanStdNormals / np.max(meanStdNormals)
         cur_afford[np.where(normalBasedSuctionScores < 0.05)] = 0 
         cur_afford[np.where(foregroundMask == False)] = 0 
         post_afford = cv.GaussianBlur(cur_afford,(7,7),7)
-
         return post_afford
-
+        
     def _window_stdev(self, X, window_size):
         """
             std filt in np
@@ -323,17 +333,20 @@ class Camera(object):
         """
             from pixel u,v and correspondent depth z -> coor in ur5 coordinate (x,y,z)
         """
-        depth = self.cur_depth[u][v] / self.depth_scale
-        x = depth*(u - self.intri[0][2]) / self.intri[0][0]
-        y = depth*(v - self.intri[1][2]) / self.intri[1][1]
+        print([u,v])
+        depth = self.cur_depth[int(u)][int(v)] / self.depth_scale
+        print(depth)
+        x = depth * (u - self.intri[0][2]) / self.intri[0][0]
+        y = depth * (v - self.intri[1][2]) / self.intri[1][1]
         camera_coor = np.array([x, y, depth - push_depth])
-
+        print(camera_coor)
         """
             from camera coor to ur5 coor
             Notice the camera faces the plain directly and we needn't convert the depth to real z
         """
         camera_coor[2] = - camera_coor[2]
         location = camera_coor + self.cam_position - np.asarray(ur5_position)
+        print(location)
         return location
     
 
@@ -349,15 +362,15 @@ class UR5(object):
         self.targetQuaternion=np.array([0.707, 0, 0.707, 0])
         # 配置关节信息
         self.jointNum = 6
-        self.baseName = 'UR5'         #机器人名字
-        self.ikName = 'UR5_ikTarget'
-        self.jointName = 'UR5_joint'
+        self.baseName = r'UR5'         #机器人名字
+        self.ikName = r'UR5_ikTarget'
+        self.jointName = r'UR5_joint'
         self.jointHandle = np.zeros((self.jointNum,), dtype=np.int) # 各关节handle
         self.jointangel=[-111.5,-22.36,88.33,28.08,-90,-21.52]
         # 配置方块信息
-        self.cubename= 'imported_part_'
-        self.filename= 'test-10-obj-'
-        self.scenepath = './scenes'
+        self.cubename= r'obj_'
+        self.filename= r'test-10-obj-'
+        self.scenepath = r'./simulation/scenes'
         self.cubenum = 11
         self.cubeHandle = np.zeros((self.cubenum,), dtype=np.int) # 各cubehandle
         self.obj_colors=[]
@@ -369,10 +382,10 @@ class UR5(object):
         """
             # connect to v-rep
         """
-        print('Simulation started') # 关闭潜在的连接 
-        vrep.simxFinish(-1) # 每隔0.2s检测一次，直到连接上V-rep 
+        print('Simulation started') # 关闭潜在的连接
+        simxFinish(-1) # 每隔0.2s检测一次，直到连接上V-rep 
         while True:
-            self.clientID = vrep.simxStart('127.0.0.1', 19999, True, True, 5000, 5) 
+            self.clientID = simxStart('127.0.0.1', 19999, True, True, 5000, 5) 
             if self.clientID > -1: 
                 break 
             else: 
@@ -380,28 +393,27 @@ class UR5(object):
                 print("Failed connecting to remote API server!") 
         print("Connection success!")
         for i in range(self.cubenum):
-            _, returnHandle = vrep.simxGetObjectHandle(self.clientID, self.cubename + str(i), vrep.simx_opmode_blocking) 
+            _, returnHandle = simxGetObjectHandle(self.clientID, self.cubename + str(i), simx_opmode_blocking) 
             self.cubeHandle[i] = returnHandle 
-            print(returnHandle)
-        vrep.simxSetFloatingParameter(self.clientID, vrep.sim_floatparam_simulation_time_step, self.tstep, vrep.simx_opmode_oneshot) # 保持API端与V-rep端相同步长
-        vrep.simxSynchronous(self.clientID, True) # 然后打开同步模式 
-        vrep.simxStartSimulation(self.clientID, vrep.simx_opmode_oneshot) 
+        simxSetFloatingParameter(self.clientID, sim_floatparam_simulation_time_step, self.tstep, simx_opmode_oneshot) # 保持API端与V-rep端相同步长
+        simxSynchronous(self.clientID, True) # 然后打开同步模式 
+        simxStartSimulation(self.clientID, simx_opmode_oneshot) 
 
     def ankleinit(self):
         """
             # initial the ankle angle for ur5
         """
         for i in range(self.jointNum):
-            _, returnHandle = vrep.simxGetObjectHandle(self.clientID, self.jointName + str(i+1), vrep.simx_opmode_blocking) 
+            _, returnHandle = simxGetObjectHandle(self.clientID, self.jointName + str(i+1), simx_opmode_blocking) 
             self.jointHandle[i] = returnHandle
-        vrep.simxSynchronousTrigger(self.clientID) # 让仿真走一步 
+        simxSynchronousTrigger(self.clientID) # 让仿真走一步 
         for i in range(self.jointNum):
-            vrep.simxPauseCommunication(self.clientID, True) 
-            vrep.simxSetJointTargetPosition(self.clientID, self.jointHandle[i],self.jointangel[i]/self.RAD2DEG, vrep.simx_opmode_oneshot)  #设置关节角
-            vrep.simxPauseCommunication(self.clientID, False)
-            vrep.simxSynchronousTrigger(self.clientID) # 进行下一步 
-            vrep.simxGetPingTime(self.clientID) # 使得该仿真步走完
-        _, self.position = vrep.simxGetObjectPosition(self.clientID, self.get_handle(), -1, vrep.simx_opmode_oneshot_wait)
+            simxPauseCommunication(self.clientID, True) 
+            simxSetJointTargetPosition(self.clientID, self.jointHandle[i],self.jointangel[i]/self.RAD2DEG, simx_opmode_oneshot)  #设置关节角
+            simxPauseCommunication(self.clientID, False)
+            simxSynchronousTrigger(self.clientID) # 进行下一步 
+            simxGetPingTime(self.clientID) # 使得该仿真步走完
+        _, self.position = simxGetObjectPosition(self.clientID, self.get_handle(), -1, simx_opmode_oneshot_wait)
 
     def cubeinit(self, filenum):
         """
@@ -418,27 +430,27 @@ class UR5(object):
         fs.close()
         for j in range(self.cubenum):
             i=int(self.obj_order[j])
-            vrep.simxPauseCommunication(self.clientID, True) 
-            vrep.simxSetObjectOrientation(self.clientID,self.cubeHandle[i],-1,self.obj_orientations[j],vrep.simx_opmode_oneshot)
-            vrep.simxPauseCommunication(self.clientID, False)
-            vrep.simxPauseCommunication(self.clientID, True) 
-            vrep.simxSetObjectPosition(self.clientID,self.cubeHandle[i],-1,self.obj_positions[j],vrep.simx_opmode_oneshot)
-            vrep.simxPauseCommunication(self.clientID, False)
+            simxPauseCommunication(self.clientID, True) 
+            simxSetObjectOrientation(self.clientID,self.cubeHandle[i],-1,self.obj_orientations[j],simx_opmode_oneshot)
+            simxPauseCommunication(self.clientID, False)
+            simxPauseCommunication(self.clientID, True) 
+            simxSetObjectPosition(self.clientID,self.cubeHandle[i],-1,self.obj_positions[j],simx_opmode_oneshot)
+            simxPauseCommunication(self.clientID, False)
 
     def disconnect(self):
         """
             # disconnect from v-rep
             # and stop simulation
         """
-        vrep.simxStopSimulation(self.clientID,vrep.simx_opmode_oneshot)
-        vrep.simxFinish(self.clientID)
+        simxStopSimulation(self.clientID,simx_opmode_oneshot)
+        simxFinish(self.clientID)
         print ('Simulation ended!')
     
     def get_clientID(self):
         return self.clientID
 
     def get_handle(self):
-        _, self.ur5_handle = vrep.simxGetObjectHandle(self.clientID, self.baseName, vrep.simx_opmode_oneshot_wait)
+        _, self.ur5_handle = simxGetObjectHandle(self.clientID, self.baseName, simx_opmode_oneshot_wait)
         return self.ur5_handle
 
     def get_position(self):
@@ -448,29 +460,29 @@ class UR5(object):
         """
             Push the ur5 hand to the location of move_to_location
         """
-        vrep.simxSynchronousTrigger(self.clientID) # 让仿真走一步 
+        simxSynchronousTrigger(self.clientID) # 让仿真走一步 
         self.targetPosition = move_to_location
-        vrep.simxPauseCommunication(self.clientID, True)    #开启仿真
-        vrep.simxSetIntegerSignal(self.clientID, 'ICECUBE_0', 21, vrep.simx_opmode_oneshot)
+        simxPauseCommunication(self.clientID, True)    #开启仿真
+        simxSetIntegerSignal(self.clientID, 'ICECUBE_0', 21, simx_opmode_oneshot)
         for i in range(3):
-            vrep.simxSetFloatSignal(self.clientID, 'ICECUBE_'+str(i+1),self.targetPosition[i],vrep.simx_opmode_oneshot)
+            simxSetFloatSignal(self.clientID, 'ICECUBE_'+str(i+1),self.targetPosition[i],simx_opmode_oneshot)
         for i in range(4):
-            vrep.simxSetFloatSignal(self.clientID, 'ICECUBE_'+str(i+4),self.targetQuaternion[i], vrep.simx_opmode_oneshot)
-        vrep.simxPauseCommunication(self.clientID, False)
-        vrep.simxSynchronousTrigger(self.clientID) # 进行下一步 
-        vrep.simxGetPingTime(self.clientID) # 使得该仿真步走完
+            simxSetFloatSignal(self.clientID, 'ICECUBE_'+str(i+4),self.targetQuaternion[i], simx_opmode_oneshot)
+        simxPauseCommunication(self.clientID, False)
+        simxSynchronousTrigger(self.clientID) # 进行下一步 
+        simxGetPingTime(self.clientID) # 使得该仿真步走完
 
     def grasp(self):
-        vrep.simxSetIntegerSignal(self.clientID,'RG2CMD',1,vrep.simx_opmode_blocking)
+        simxSetIntegerSignal(self.clientID,'RG2CMD',1,simx_opmode_blocking)
 
     def lose(self):
-        vrep.simxSetIntegerSignal(self.clientID,'RG2CMD',0,vrep.simx_opmode_blocking)
+        simxSetIntegerSignal(self.clientID,'RG2CMD',0,simx_opmode_blocking)
 
     def getcubepos(self):
         for j in range(self.cubenum):
             i=int(self.obj_order[j])
-            _,self.obj_positions=vrep.simxGetObjectPosition(self.clientID,self.cubeHandle[i],-1,vrep.simx_opmode_blocking)
-            _,self.obj_orientations=vrep.simxGetObjectOrientation(self.clientID,self.cubeHandle[i],-1,vrep.simx_opmode_blocking)
+            _,self.obj_positions=simxGetObjectPosition(self.clientID,self.cubeHandle[i],-1,simx_opmode_blocking)
+            _,self.obj_orientations=simxGetObjectOrientation(self.clientID,self.cubeHandle[i],-1,simx_opmode_blocking)
             print(self.obj_positions+self.obj_orientations)
 
 class DQNEnvironment(object):
@@ -480,6 +492,7 @@ class DQNEnvironment(object):
     def __init__(self, config):
         self.Lua_PATH = config.Lua_PATH
         self.end_reward = config.end_reward
+        self.scene_num = config.scene_num
         self.EDG2RAD = math.pi / 180
         # initial the ur5 arm in simulation
         self.ur5 = UR5()
@@ -497,17 +510,19 @@ class DQNEnvironment(object):
         self.inChannel = config.inChannel
         self.screen_height = config.screen_height
         self.screen_width = config.screen_width
-        self.location_2d = [self.screen_height//2, self.screen_width//2]
+        self.location_2d = [self.camera.Img_HEIGHT//2, self.camera.Img_WIDTH//2]
         self.screen = np.empty((self.inChannel, self.screen_height, self.screen_width))
         self.index = 0
+        self.metric = 0
         self.save_size = 1000 # use this params is for over-storage of early img in disk -> which used for the affordance input
 
     def new_scene(self):
         """
             Random initial the scene
-            # scene index is from 0~2
+            # scene index is from 0~self.scene_num-1
         """
-        scene_num = random.randint(0, 3)
+        scene_num = random.randint(0, self.scene_num)
+        print(' [*] Random init the scene %2d' %(scene_num))
         self.ur5.cubeinit(scene_num)
         # return the camera_data
         self.index = (self.index + 1)% self.save_size
@@ -534,6 +549,7 @@ class DQNEnvironment(object):
             use new affordance map -> terminal
         """
         # act on the scene
+
         move_to_location = self.action2ur5(action)
         self.ur5.ur5moveto(move_to_location)
 
@@ -598,7 +614,7 @@ class DQNEnvironment(object):
         flatten = np.sum((affmax - afford_map) **2)/(afford_map.size - 1)
 
         metric = 0.4*(1-reg_peak_dis) + 0.4*flatten + 0.2*center_value
-
+        print('reward: %f' %(metric))
         return metric
 
     def action2ur5(self, action):
@@ -619,12 +635,10 @@ class DQNEnvironment(object):
         relate_local = (np.asarray(relate_local) + 1.0) * self.screen_height / 96 - 1.0
         relate_local = np.round(relate_local)
         real_local = self.location_2d + relate_local - self.screen_height // 2
-        
         # -> to the new push point with dest ori and depth
         real_dest = real_local
         real_dest[0] = real_local[0] + push_dis * math.cos(ori*self.EDG2RAD)
         real_dest[1] = real_local[1] + push_dis * math.sin(ori*self.EDG2RAD)
         real_dest = np.round(real_dest)
-
         # from pixel coor to real ur5 coor
         return self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5_location, push_depth)

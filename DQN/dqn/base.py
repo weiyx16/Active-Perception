@@ -35,7 +35,7 @@ class BaseModel(object):
         else:
             print(" [!] Load FAILED: %s" % self.checkpoint_dir)
             print(" [*] Created model with fresh parameters.")
-            self.sess.run(tf.global_variables_initializer())
+            # self.sess.run(tf.global_variables_initializer())
             return False
 
     @property

@@ -1,4 +1,4 @@
-require 'cutorch';
+--require 'cutorch';
 require 'cunn';
 require 'cudnn'
 require 'image'
@@ -18,7 +18,7 @@ opt = opts.parse(arg)
 options = {
   imgColorPath = opt.imgColorPath,
   imgDepthPath = opt.imgDepthPath,
-  modelPath = './suction-based-grasping-snapshot-10001.t7',
+  modelPath = '../affordance_model/model.t7',
   resultsPath = opt.resultPath,
   outputScale = 1/8,
   imgHeight =  424,
@@ -32,7 +32,7 @@ for k,v in pairs(options) do options[k] = tonumber(os.getenv(k)) or os.getenv(k)
 math.randomseed(os.time())
 
 -- Load trained model and set to testing (evaluation) mode
-print('Loading model: '..options.modelPath)
+-- print('Loading model: '..options.modelPath)
 local model = torch.load(options.modelPath)
 model:add(cudnn.SpatialSoftMax())
 model = model:cuda()
@@ -47,7 +47,7 @@ local input  = {torch.Tensor(1, 3, options.imgHeight, options.imgWidth),torch.Te
 local results = torch.Tensor(1,3,options.imgHeight*options.outputScale,options.imgWidth*options.outputScale):float()
 
 -- Load and pre-process color image (24-bit RGB PNG)
-print('Pre-processing color image: '..options.imgColorPath)
+-- print('Pre-processing color image: '..options.imgColorPath)
 local colorImg = image.load(options.imgColorPath)
 for c=1,3 do
     colorImg[c]:add(-mean[c])
@@ -55,10 +55,10 @@ for c=1,3 do
 end
 
 -- Load and pre-process depth image (16-bit PNG depth in deci-millimeters)
-print('Pre-processing depth image: '..options.imgDepthPath)
-local depth = image.load(options.imgDepthPath)
-depth = depth*65536/10000
-depth = depth:clamp(0.0,1.2) -- Depth range of Intel RealSense SR300
+-- print('Pre-processing depth image: '..options.imgDepthPath)
+local depth = image.load(options.imgDepthPath) -- When load the image it is divided by 65536
+depth = depth*65536/10000 -- same scale with postprocess
+depth = depth:clamp(0.0,1.2) -- Depth range of Intel RealSense SR300 (>1.2 ->1.2; <0 ->0)
 local depthImg = depth:cat(depth,1):cat(depth,1)
 for c=1,3 do
     depthImg[c]:add(-mean[c])
@@ -71,14 +71,14 @@ input[2]:copy(depthImg:reshape(1, 3, options.imgHeight, options.imgWidth))
 input[1] = input[1]:cuda()
 input[2] = input[2]:cuda()
 
--- Compute forward pass
-print('Computing forward pass...')
+-- -- Compute forward pass
+-- print('Computing forward pass...')
 local output = model:forward(input)
 
--- Save output test results
-print('Saving results to: '..options.resultsPath)
+-- -- Save output test results
+-- print('Saving results to: '..options.resultsPath)
 results = output:float()
 local resultsFile = hdf5.open(options.resultsPath, 'w')
 resultsFile:write('results', results:float())
 resultsFile:close()
-print('Done.')
+-- print('Done.')

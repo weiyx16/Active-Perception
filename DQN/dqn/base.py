@@ -45,5 +45,5 @@ class BaseModel(object):
     @property
     def saver(self):
         if self._saver == None:
-            self._saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1.0)
+            self._saver = tf.train.Saver(max_to_keep=10) #, keep_checkpoint_every_n_hours=1.0)
             return self._saver

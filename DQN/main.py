@@ -56,13 +56,13 @@ def main(_):
         print("\n [*] Current Configuration")
         pp(config.list_all_member())
 
+        # Notice before the process 
+        # Code in remoteApi.start(19999) in Vrep otherwise it may cause some unpredictable problem
         env = DQNEnvironment(config)
         if not tf.test.is_gpu_available() and FLAGS.use_gpu:
             raise Exception("use_gpu flag is true when no GPUs are available")
         
-        # agent = Agent(config, env, sess)
-
-        '''
+        agent = Agent(config, env, sess)
         if config.is_train:
             agent.train()
         else:
@@ -79,7 +79,7 @@ def main(_):
                 env.act(random.randint(0,96*96*16-1))
             else:
                 continue
-                
+        '''
 
         env.close()
 

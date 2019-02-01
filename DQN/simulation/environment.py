@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 import time
 import numpy.random as random
 import numpy as np
@@ -23,6 +24,9 @@ except:
     print ('--------------------------------------------------------------')
     print ('')
 
+# TODO: 把vrep改到在后台运行（当把所有bugfit完之后），这个太卡啦，超级吃内存
+# simRemoteApi.start(19999)
+
 class Camera(object):
     """
         # kinect camera in simulation
@@ -43,6 +47,7 @@ class Camera(object):
         # self.INT16 = 65535
         self.Img_WIDTH = 512
         self.Img_HEIGHT = 424
+        self.border_pos = [68,324,112,388] #up down left right of the box
         self.theta = 70
         self.Camera_NAME = r'kinect'
         self.Camera_RGB_NAME = r'kinect_rgb'
@@ -107,8 +112,8 @@ class Camera(object):
         # ref: https://blog.csdn.net/zyh821351004/article/details/49786575
         fx = -self.Img_WIDTH/(2.0 * math.tan(self.theta * self.EDG2RAD / 2.0))
         fy = fx
-        u0 = self.Img_WIDTH / 2
-        v0 = self.Img_HEIGHT / 2
+        u0 = self.Img_HEIGHT/ 2
+        v0 = self.Img_WIDTH / 2
         self.intri = np.array([[fx, 0, u0],
                                [0, fy, v0],
                                [0, 0, 1]])
@@ -199,16 +204,15 @@ class Camera(object):
         # first get the current img data first
         cur_depth, cur_color = self.get_camera_data()
         cur_depth_path, cur_img_path = self.save_image(cur_depth, cur_color, img_idx)
-        
         # feed this image into affordance map network and get the h5 file
         cur_res_path = os.path.join(self.Save_PATH_RES, str(img_idx) + '_results.h5')
         affordance_cmd = 'th ' + self.Lua_PATH + ' -imgColorPath ' + cur_img_path + \
                         ' -imgDepthPath ' + cur_depth_path + ' -resultPath ' + cur_res_path
         try:
+            # subprocess.call(affordance_cmd)
             os.system(affordance_cmd)
         except:
             raise Exception(' [!] !!!!!!!!!!!  Error occurred during calling affordance map')
-        
         # get the initial affordance map from h5 file
         if os.path.isfile(cur_res_path):
             cur_afford = self.hdf2affimg(cur_res_path)
@@ -217,11 +221,8 @@ class Camera(object):
             raise Exception(' [!] !!!!!!!!!!!  Error occurred during creating affordance map')          
 
         # postprocess the affordance map
-        post_afford = self._postproc_affimg(cur_color, cur_depth, cur_afford)
-        location = np.where(post_afford == np.max(post_afford))
-
-        location_2d = np.transpose(np.array(location))[0]
-        print(location_2d)
+        post_afford, location_2d = self._postproc_affimg(cur_color, cur_depth, cur_afford)
+        print(' -- Maximum Location at {}' .format(location_2d))
         # according to the affordance map -> get the local patch with size of 4*128*128
         return self._get_patch(location_2d, cur_color, cur_depth, post_afford, patch_size)
 
@@ -294,7 +295,16 @@ class Camera(object):
         cur_afford[np.where(normalBasedSuctionScores < 0.05)] = 0 
         cur_afford[np.where(foregroundMask == False)] = 0 
         post_afford = cv.GaussianBlur(cur_afford,(7,7),7)
-        return post_afford
+
+        aff_center = post_afford[self.border_pos[0]:self.border_pos[1],self.border_pos[2]:self.border_pos[3]]
+        aff_max = np.max(aff_center)
+        # print(' -- Candidate Maximum location {}' .format(np.transpose(np.where(aff_center == aff_max))))
+        location = np.transpose(np.where(aff_center == aff_max))[0] + \
+            np.asarray([self.border_pos[0],self.border_pos[2]])
+        tmp = aff_max+np.zeros(post_afford.shape)
+        tmp[self.border_pos[0]:self.border_pos[1],self.border_pos[2]:self.border_pos[3]] = aff_center     
+        post_afford = tmp
+        return post_afford,location
         
     def _window_stdev(self, X, window_size):
         """
@@ -329,25 +339,23 @@ class Camera(object):
         cloud_normals = ne.compute()
         return cloud_normals
 
-    def pixel2ur5(self, u, v, ur5_position, push_depth):
+    def pixel2ur5(self, u, v, ur5_position, push_depth, depth = 0.0, is_dst = True):
         """
             from pixel u,v and correspondent depth z -> coor in ur5 coordinate (x,y,z)
         """
-        print([u,v])
-        depth = self.cur_depth[int(u)][int(v)] / self.depth_scale
-        print(depth)
+        if is_dst == False:
+            depth = self.cur_depth[int(u)][int(v)] / self.depth_scale
+
         x = depth * (u - self.intri[0][2]) / self.intri[0][0]
         y = depth * (v - self.intri[1][2]) / self.intri[1][1]
         camera_coor = np.array([x, y, depth - push_depth])
-        print(camera_coor)
         """
             from camera coor to ur5 coor
             Notice the camera faces the plain directly and we needn't convert the depth to real z
         """
         camera_coor[2] = - camera_coor[2]
         location = camera_coor + self.cam_position - np.asarray(ur5_position)
-        print(location)
-        return location
+        return location, depth
     
 
 class UR5(object):
@@ -367,6 +375,7 @@ class UR5(object):
         self.jointName = r'UR5_joint'
         self.jointHandle = np.zeros((self.jointNum,), dtype=np.int) # 各关节handle
         self.jointangel=[-111.5,-22.36,88.33,28.08,-90,-21.52]
+        self.position = []
         # 配置方块信息
         self.cubename= r'obj_'
         self.filename= r'test-10-obj-'
@@ -397,7 +406,10 @@ class UR5(object):
             self.cubeHandle[i] = returnHandle 
         simxSetFloatingParameter(self.clientID, sim_floatparam_simulation_time_step, self.tstep, simx_opmode_oneshot) # 保持API端与V-rep端相同步长
         simxSynchronous(self.clientID, True) # 然后打开同步模式 
-        simxStartSimulation(self.clientID, simx_opmode_oneshot) 
+        simxStartSimulation(self.clientID, simx_opmode_oneshot)
+        # Get the location of the ur5
+        _, self.ur5_handle = simxGetObjectHandle(self.clientID, self.baseName, simx_opmode_oneshot_wait)
+        _, self.position = simxGetObjectPosition(self.clientID, self.ur5_handle, -1, simx_opmode_oneshot_wait)
 
     def ankleinit(self):
         """
@@ -413,7 +425,8 @@ class UR5(object):
             simxPauseCommunication(self.clientID, False)
             simxSynchronousTrigger(self.clientID) # 进行下一步 
             simxGetPingTime(self.clientID) # 使得该仿真步走完
-        _, self.position = simxGetObjectPosition(self.clientID, self.get_handle(), -1, simx_opmode_oneshot_wait)
+        _, self.ur5_hand_handle = simxGetObjectHandle(self.clientID, self.ikName, simx_opmode_oneshot_wait)
+        _, self.hand_init_pos = simxGetObjectPosition(self.clientID, self.ur5_hand_handle, -1, simx_opmode_oneshot_wait)
 
     def cubeinit(self, filenum):
         """
@@ -449,19 +462,34 @@ class UR5(object):
     def get_clientID(self):
         return self.clientID
 
-    def get_handle(self):
-        _, self.ur5_handle = simxGetObjectHandle(self.clientID, self.baseName, simx_opmode_oneshot_wait)
-        return self.ur5_handle
-
     def get_position(self):
         return self.position
 
-    def ur5moveto(self, move_to_location):
+    def ur5act(self, move_begin, move_to):
         """
-            Push the ur5 hand to the location of move_to_location
+            The action of the ur5 in a single act including:
+            Get to push beginning
+            Push to the destination
+            Return to the init pose
+        """
+        self.grasp()
+        self.ur5moveto(move_begin)
+        time.sleep(0.2)
+        # input('?? ')
+        self.ur5moveto(move_to)
+        time.sleep(0.2)
+        # input('?? ')
+        # Return to the initial pose
+        self.ur5moveto([0.3, 0, 0.5])#TODO: self.hand_init_pos)
+        time.sleep(0.2)
+        self.lose()
+
+    def ur5moveto(self, dst_location):
+        """
+            Push the ur5 hand to the location of dst_location
         """
         simxSynchronousTrigger(self.clientID) # 让仿真走一步 
-        self.targetPosition = move_to_location
+        self.targetPosition = dst_location
         simxPauseCommunication(self.clientID, True)    #开启仿真
         simxSetIntegerSignal(self.clientID, 'ICECUBE_0', 21, simx_opmode_oneshot)
         for i in range(3):
@@ -491,7 +519,7 @@ class DQNEnvironment(object):
     """
     def __init__(self, config):
         self.Lua_PATH = config.Lua_PATH
-        self.end_reward = config.end_reward
+        self.End_Metric = config.end_reward
         self.scene_num = config.scene_num
         self.EDG2RAD = math.pi / 180
         # initial the ur5 arm in simulation
@@ -512,9 +540,9 @@ class DQNEnvironment(object):
         self.screen_width = config.screen_width
         self.location_2d = [self.camera.Img_HEIGHT//2, self.camera.Img_WIDTH//2]
         self.screen = np.empty((self.inChannel, self.screen_height, self.screen_width))
-        self.index = 0
+        self.index = -1
         self.metric = 0
-        self.save_size = 1000 # use this params is for over-storage of early img in disk -> which used for the affordance input
+        self.save_size = 500 # use this params is for over-storage of early img in disk -> which used for the affordance input
 
     def new_scene(self):
         """
@@ -529,6 +557,7 @@ class DQNEnvironment(object):
         # location_2d stores the maximum affordance value coor know in the scene
         self.screen, self.local_afford_past, self.location_2d = self.camera.local_patch(self.index, (self.screen_height, self.screen_width))
         self.local_afford_new = self.local_afford_past
+        self.metric = self.reward_metric(self.local_afford_new)
         self.terminal = self.ifterminal()
         return self.screen, 0., -1, self.terminal
 
@@ -550,14 +579,16 @@ class DQNEnvironment(object):
         """
         # act on the scene
 
-        move_to_location = self.action2ur5(action)
-        self.ur5.ur5moveto(move_to_location)
-
+        move_begin, move_to = self.action2ur5(action)
+        print(' -- Push to {}' .format(move_to))
+        self.ur5.ur5act(move_begin, move_to)
+        time.sleep(1) # Wait for the ur5 to move to init location
         # get the new camera_data
         self.index = (self.index + 1)% self.save_size
         # location_2d stores the maximum affordance value coor know in the scene
         self.local_afford_past = self.local_afford_new
         self.screen, self.local_afford_new, self.location_2d = self.camera.local_patch(self.index, (self.screen_height, self.screen_width))
+        
         self.reward = self.calc_reward()
         self.terminal = self.ifterminal()
         return self.screen, self.reward, self.terminal
@@ -566,8 +597,9 @@ class DQNEnvironment(object):
         """
             Use two affordance map to calculate the reward
         """
+        last_metric = self.metric
         self.metric = self.reward_metric(self.local_afford_new)
-        if (self.metric - self.reward_metric(self.local_afford_past)) > 0. :
+        if (self.metric - last_metric) > 0. :
             return 1.
         else:
             return -1.
@@ -576,7 +608,7 @@ class DQNEnvironment(object):
         """
             Use the self.local_afford_new to judge if terminal
         """
-        return self.metric > self.end_reward
+        return self.metric > self.End_Metric
 
     def reward_metric(self, afford_map):
         """
@@ -596,10 +628,12 @@ class DQNEnvironment(object):
         peaknum = 0
         for i in range(rr,self.screen_height-rr-1):
             for j in range(rr,self.screen_width-rr-1):
-                if afford_map[i,j] == np.max(afford_map[i-rr:i+rr+1,j-rr:j+rr+1]) and afford_map[i,j] > peakjudge:
+                tmp = afford_map[i-rr:i+rr+1,j-rr:j+rr+1]
+                local_value = tmp[rr, rr]
+                tmp[rr, rr] = 0
+                if local_value > np.max(tmp) and local_value > peakjudge:
                     peaknum += 1
                     peaklocation.append((i,j))
-        
         peak_dis= 0.
         for i in range(0,peaknum):
             peak_dis += ((peaklocation[i][0]-half_screen) **2 + (peaklocation[i][1]-half_screen) **2) **0.5
@@ -614,7 +648,7 @@ class DQNEnvironment(object):
         flatten = np.sum((affmax - afford_map) **2)/(afford_map.size - 1)
 
         metric = 0.4*(1-reg_peak_dis) + 0.4*flatten + 0.2*center_value
-        print('reward: %f' %(metric))
+        print(' -- Metric for current frame: %f' %(metric))
         return metric
 
     def action2ur5(self, action):
@@ -622,23 +656,27 @@ class DQNEnvironment(object):
             first convert the action to (x,y,depth)
             then convert x,y,depth to pixel coor(according to the location_2d)
             then convert to coor in ur5
+
+            Including the beginning point and destination point
         """
         # 96, 96 is the output of the u-net
         idx = np.unravel_index(action, (96, 96, 16))
         relate_local = list(idx[0:2])
         ori_depth_idx = np.unravel_index(int(idx[2]), (8,2))
         ori = ori_depth_idx[0] * 360. / 8.
-        push_depth = ori_depth_idx[1] * 0.02 # choose in two depth 0 or 0.02 (deeper than the pixel depth) TODO:
-        push_dis = self.screen_height // 4 # fix the push distance in 32 pixel TODO:
+        push_depth = ori_depth_idx[1] * (-0.04) # choose in current depth or 4cm deeper one
+        # (ori_depth_idx[1] - 0.5) * 0.04 # choose in two depth -0.02 or 0.02 (deeper than the pixel depth) TODO:
+        push_dis = self.screen_height / 4 # fix the push distance in 32 pixel TODO:
 
         # seems the output of the u-net is the same size of input so we need to resize the output idx
         relate_local = (np.asarray(relate_local) + 1.0) * self.screen_height / 96 - 1.0
         relate_local = np.round(relate_local)
         real_local = self.location_2d + relate_local - self.screen_height // 2
         # -> to the new push point with dest ori and depth
-        real_dest = real_local
-        real_dest[0] = real_local[0] + push_dis * math.cos(ori*self.EDG2RAD)
-        real_dest[1] = real_local[1] + push_dis * math.sin(ori*self.EDG2RAD)
-        real_dest = np.round(real_dest)
+        real_dest = []
+        real_dest.append (real_local[0] + push_dis * math.cos(ori*self.EDG2RAD))
+        real_dest.append (real_local[1] + push_dis * math.sin(ori*self.EDG2RAD))
         # from pixel coor to real ur5 coor
-        return self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5_location, push_depth)
+        move_begin, src_depth = self.camera.pixel2ur5(real_local[0], real_local[1], self.ur5_location, push_depth, is_dst = False)
+        move_to, _ = self.camera.pixel2ur5(real_dest[0], real_dest[1], self.ur5_location, push_depth, src_depth, is_dst = True)
+        return move_begin, move_to

@@ -85,10 +85,10 @@ def deconv2d(x,
             output_shape = tf.stack([tf.shape(x)[0], input_shape[1]//2, input_shape[2]*2, input_shape[3]*2])
         elif data_format == 'NHWC':
             stride = [1, stride[0], stride[1], 1]
-            kernel_shape = [kernel_size[0], kernel_size[1], input_shape[3]//2, input_shape[-1]]
+            kernel_shape = [kernel_size[0], kernel_size[1], input_shape[-1]//2, input_shape[-1]]
             output_shape = tf.stack([tf.shape(x)[0], input_shape[1]*2, input_shape[2]*2, input_shape[3]//2])
-        w = tf.get_variable('w', kernel_shape, tf.float32, initializer=initializer)
         
+        w = tf.get_variable('w', kernel_shape, tf.float32, initializer=initializer)
         out = tf.nn.conv2d_transpose(x, w, output_shape, stride, padding, data_format=data_format)
         
         if activation_fn != None:

@@ -20,7 +20,7 @@ class Agent(BaseModel):
     def __init__(self, config, environment, sess):
         super(Agent, self).__init__(config)
         self.sess = sess
-        self.weight_dir = r'../weights'
+        self.weight_dir = r'./dqn/weights'
         self.action_num = 96*96*16
         self.env = environment
         self.history = History(self.config)
@@ -52,6 +52,7 @@ class Agent(BaseModel):
             self.history.add(screen)
 
         for self.step in tqdm(range(start_step, self.max_step), ncols=70, initial=start_step):
+            command = input('Continue ')
             if self.step == self.learn_start:
                 num_game, self.update_count, ep_reward = 0, 0, 0.
                 total_reward, self.total_loss, self.total_q = 0., 0., 0.
@@ -146,7 +147,7 @@ class Agent(BaseModel):
             action = random.randrange(0, self.action_num) 
         else:
             # Don't need sess.run(self.q_action, feed_dict={xxx})? -> because we run a session in the main function
-            # q_action is batch_size(1) * 1 (action is the pixel index(TODO:notice convert to (48,48,16) coor))
+            # q_action is batch_size(=1) * 1
             action = self.q_action.eval({self.s_t: [s_t]})[0]
 
         return action
@@ -182,7 +183,7 @@ class Agent(BaseModel):
         else:
             s_t, action, reward, s_t_plus_1, terminal = self.memory.sample()
 
-        t = time.time()
+        # t = time.time()
 
         # notice get eval in the new state
         # s_t_plus_l已经是batch_size*x*x*x的4-D tensor了
@@ -265,11 +266,11 @@ class Agent(BaseModel):
                     512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_2')            
                 # l7 = None*26*26*512
 
-                # Upsampling_1
+                # Upsampling_1 the output shape: https://datascience.stackexchange.com/questions/26451/how-to-calculate-the-output-shape-of-conv2d-transpose
                 self.l8, self.w['U1_w'] = deconv2d(self.l7, 
-                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U1')
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U1')
                 # l8 = None*52*52*256
-
+                
                 # Cascading (l4, l8)
                 self.l9 = crop_and_concat(self.l4, self.l8, self.cnn_format, name=idx+'_CrConc1')
                 # l9 = None*52*52*512
@@ -281,7 +282,7 @@ class Agent(BaseModel):
 
                 # Upsampling_2
                 self.l11, self.w['U2_w'] = deconv2d(self.l10, 
-                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U2')
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U2')
                 # l11 = None*100*100*128       
 
                 # Cascading (l2, l11)
@@ -438,7 +439,7 @@ class Agent(BaseModel):
                 self.w = self.w_all[i]
                 for name in self.w.keys():
                     # t_w_input <= w_value
-                    self.t_w_input[name] = tf.placeholder('float32', self.t_w[name].get_shape().as_list(), name=name)
+                    self.t_w_input[name] = tf.placeholder('float32', self.t_w[name].get_shape().as_list(), name=str(i)+name)
                     self.t_w_assign_op[name] = self.t_w[name].assign(self.t_w_input[name])
 
                 self.t_w_input_all.append(self.t_w_input)
@@ -501,11 +502,12 @@ class Agent(BaseModel):
                 self.summary_placeholders[tag] = tf.placeholder('float32', None, name=tag.replace(' ', '_'))
                 self.summary_ops[tag]  = tf.summary.histogram(tag, self.summary_placeholders[tag])
 
-            self.writer = tf.summary.FileWriter('../logs', self.sess.graph)
+            self.writer = tf.summary.FileWriter('./dqn/logs', self.sess.graph)
         print(' [*] Build Summary Scope')
-        tf.global_variables_initializer().run()
 
-        self._saver = tf.train.Saver(self.w.values() + [self.step_op], max_to_keep = 10, keep_checkpoint_every_n_hours=1.0)
+        tf.global_variables_initializer().run()
+        print(' [*] Initial All Variables')
+        self._saver = tf.train.Saver(list(self.w.values()) + [self.step_op], max_to_keep = 10) #, keep_checkpoint_every_n_hours=1.0)
         #　这个saver会覆盖base model里生成的saver
 
         self.load_model()
@@ -521,6 +523,7 @@ class Agent(BaseModel):
             self.t_w_input = self.t_w_input_all[i]
             for name in self.w.keys():
                 self.t_w_assign_op[name].eval({self.t_w_input[name]: self.w[name].eval()})
+        print(' [*] Assign Weights from Prediction to Target')
 
     # Unused
     def save_weight_to_pkl(self):

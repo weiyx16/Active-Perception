@@ -4,12 +4,12 @@ class DQNConfig(object):
 
         # ----------- Agent Params
         self.scale = 50
-        self.display = False
+        # self.display = False
 
         self.max_step = 2000 * self.scale
         self.memory_size = 50 * self.scale
 
-        self.batch_size = 32
+        self.batch_size = 6 # 8 is not available in 5.5G RAM
         # self.random_start = 30
         self.cnn_format = 'NCHW'
         self.discount = 0.99 # epsilon in RL (decay index)
@@ -48,11 +48,11 @@ class DQNConfig(object):
 
         # ----------- Model Params
         self.inChannel = 4 # RGBD
-        self.action_repeat = 4
+        # self.action_repeat = 4
         self.ckpt_dir = r'./dqn/checkpoint'
         self.model_dir = r'./dqn/model'
         self.is_train = True
-        self.end_reward = 0.5
+        self.end_reward = 0.85
         
         if FLAGS.use_gpu == False:
             self.cnn_format = 'NHWC'

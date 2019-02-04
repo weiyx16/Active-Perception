@@ -1,5 +1,5 @@
 """
-    -- This agent is utilizing the CNN+16 U-net layer as for the Deep part (16 U-net with 8 different direction and 2 different depth)
+    -- This agent is utilizing the CNN+8 U-net layer as for the Deep part (8 U-net with 8 different direction and 2 different depth)
     -- and the input state is 4-channel screen (with different history and memory)
 """
 import os
@@ -21,7 +21,7 @@ class Agent(BaseModel):
         super(Agent, self).__init__(config)
         self.sess = sess
         self.weight_dir = r'./dqn/weights'
-        self.action_num = 96*96*16
+        self.action_num = 96*96*8
         self.env = environment
         self.history = History(self.config)
         self.memory = ReplayMemory(self.config, self.model_dir)
@@ -52,7 +52,6 @@ class Agent(BaseModel):
             self.history.add(screen)
 
         for self.step in tqdm(range(start_step, self.max_step), ncols=70, initial=start_step):
-            command = input('Continue ')
             if self.step == self.learn_start:
                 num_game, self.update_count, ep_reward = 0, 0, 0.
                 total_reward, self.total_loss, self.total_q = 0., 0., 0.
@@ -61,13 +60,12 @@ class Agent(BaseModel):
             # 1. predict
             action = self.predict(self.history.get())
             # 2. act
-            # notice the action is in [0, 96*96*16-1]
+            # notice the action is in [0, 96*96*8-1]
             screen, reward, terminal = self.env.act(action, is_training=True)
             # 3. observe & store
             self.observe(screen, reward, action, terminal)
             # 4. learn
             self.learn()
-
             # 注意 ep_reward属于在每次simulation里的总和
             # 把每次simulation得到总reward存成list放在ep_rewards里，在test_step来的时候存下来
             # 而 total_reward属于在test_step里的总和
@@ -78,7 +76,8 @@ class Agent(BaseModel):
                 # 注意！这个代码里训练部分没有epoch的概念，每次结束后，接着之前的step / memory 继续去尝试得到新的场景
                 # 所以才会出现memory中间有terminal的情况，在history_length周围有重新开始一次仿真的话，就不get这个sample
                 # 加上epoch（本质就是场景重新开始）也不能让step重置，也就是说初始的learn_start的step满足之后，就不会再回到learn_start的懵懂阶段了
-                screen, reward, action, terminal = self.env.new_scene()
+                command = input('\n >> Continue ')
+                screen, reward, action, terminal = self.env.new_scene() # TODO: It's not available now
                 self.history.add(screen)
                 num_game += 1
                 ep_rewards.append(ep_reward)
@@ -122,7 +121,7 @@ class Agent(BaseModel):
                         'episode.actions': actions,
                         'training.learning_rate': self.learning_rate_op.eval({self.learning_rate_step: self.step}),}
                         , self.step)
-
+                    
                     # 注意这些信息都是每个test_step的轮回里进行存取读出的
                     num_game = 0
                     total_reward = 0.
@@ -137,7 +136,6 @@ class Agent(BaseModel):
         """
             -- According to the estimation result -> get the prediction action (or exploration instead)
         """
-        # TODO: 这里从history里get的s_t是3-D的tensor，要转换成[1,3-D]shape的4D tensor吗？？
         # TODO: it seems this epsilon is a little complex?
         ep = test_ep or (self.ep_end + max(0., (self.ep_start - self.ep_end)
                 * (self.ep_end_t - max(0., self.step - self.learn_start)) / self.ep_end_t))
@@ -188,7 +186,7 @@ class Agent(BaseModel):
         # notice get eval in the new state
         # s_t_plus_l已经是batch_size*x*x*x的4-D tensor了
         q_t_plus_1 = self.target_q_flat.eval({self.target_s_t: s_t_plus_1})
-        # q_t_plus_l = batch_size * self.action_num(96*96*16)
+        # q_t_plus_l = batch_size * self.action_num(96*96*8)
 
         terminal = np.array(terminal) + 0.
         max_q_t_plus_1 = np.max(q_t_plus_1, axis=1) #对每个sample 得到所有动作里最大的q_value
@@ -215,7 +213,7 @@ class Agent(BaseModel):
     def _build_dqn(self):
         """
             Build the Deep Q-table network
-            16 U-net based
+            8 U-net based
         """
         print(' [*] Build Deep Q-Network')
         self.w_all = [] # a list to save dicts which save each layer weights and bias for estimation network
@@ -235,8 +233,8 @@ class Agent(BaseModel):
                 self.s_t = tf.placeholder('float32',
                     [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='s_t')
 
-            # s_t = None*128*128*16(history_length*inChannel)
-            for i in range(16):
+            # s_t = None*128*128*8(history_length*inChannel)
+            for i in range(8):
                 idx = str(i)
                 # downsample_1
                 self.w = {}
@@ -311,10 +309,10 @@ class Agent(BaseModel):
                         self.q_all = tf.concat([self.q_all, self.q], 1)
                 self.w_all.append(self.w)
 
-            # q_all = None*96*96*16
+            # q_all = None*96*96*8
             shape = self.q_all.get_shape().as_list()
             self.q_flat = tf.reshape(self.q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(96^2*16)
+            # q_flat = None*(96^2*8)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
             # Find every max q_flat -> action index for each sample in batch
             self.q_action = tf.argmax(self.q_flat, axis=1)
@@ -342,8 +340,8 @@ class Agent(BaseModel):
                 self.target_s_t = tf.placeholder('float32',
                     [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='target_s_t')
             
-            # s_t = None*128*128*16(history_length*inChannel)
-            for i in range(16):
+            # s_t = None*128*128*8(history_length*inChannel)
+            for i in range(8):
                 idx = str(i)
                 # downsample_1
                 self.t_w = {}
@@ -375,7 +373,7 @@ class Agent(BaseModel):
 
                 # Upsampling_1
                 self.target_l8, self.t_w['U1_w'] = deconv2d(self.target_l7, 
-                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U1')
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U1')
                 # l8 = None*52*52*256
 
                 # Cascading (l4, l8)
@@ -389,7 +387,7 @@ class Agent(BaseModel):
 
                 # Upsampling_2
                 self.target_l11, self.t_w['U2_w'] = deconv2d(self.target_l10, 
-                    [1, 1], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U2')
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U2')
                 # l11 = None*100*100*128       
                        
                 # Cascading (l2, l11)
@@ -420,7 +418,7 @@ class Agent(BaseModel):
 
             shape = self.target_q_all.get_shape().as_list()
             self.target_q_flat = tf.reshape(self.target_q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(96^2*16)
+            # q_flat = None*(96^2*8)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
 
             # TODO: What's there two stuffs for????
@@ -432,7 +430,7 @@ class Agent(BaseModel):
         with tf.variable_scope('pred_to_target'):
             self.t_w_input_all = []
             self.t_w_assign_op_all = []
-            for i in range(16):
+            for i in range(8):
                 self.t_w_input = {}
                 self.t_w_assign_op = {}
                 self.t_w = self.t_w_all[i]
@@ -517,7 +515,7 @@ class Agent(BaseModel):
         """
             Assign estimation network weights to target network. (not simultaneous)
         """
-        for i in range(16):
+        for i in range(8):
             self.w = self.w_all[i]
             self.t_w_assign_op = self.t_w_assign_op_all[i]
             self.t_w_input = self.t_w_input_all[i]

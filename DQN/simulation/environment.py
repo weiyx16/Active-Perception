@@ -474,14 +474,14 @@ class UR5(object):
         """
         self.grasp()
         self.ur5moveto(move_begin)
-        time.sleep(0.2)
+        # time.sleep(0.4)
         # input('?? ')
         self.ur5moveto(move_to)
-        time.sleep(0.2)
+        # time.sleep(0.4)
         # input('?? ')
         # Return to the initial pose
         self.ur5moveto([0.3, 0, 0.5])#TODO: self.hand_init_pos)
-        time.sleep(0.2)
+        # time.sleep(0.3)
         self.lose()
 
     def ur5moveto(self, dst_location):
@@ -580,9 +580,9 @@ class DQNEnvironment(object):
         # act on the scene
 
         move_begin, move_to = self.action2ur5(action)
-        print(' -- Push to {}' .format(move_to))
+        print('\n -- Push to {}' .format(move_to))
         self.ur5.ur5act(move_begin, move_to)
-        time.sleep(1) # Wait for the ur5 to move to init location
+        time.sleep(1.5) # Wait for the ur5 to move to init location
         # get the new camera_data
         self.index = (self.index + 1)% self.save_size
         # location_2d stores the maximum affordance value coor know in the scene
@@ -599,7 +599,7 @@ class DQNEnvironment(object):
         """
         last_metric = self.metric
         self.metric = self.reward_metric(self.local_afford_new)
-        if (self.metric - last_metric) > 0. :
+        if (self.metric - last_metric) > 0.01 :
             return 1.
         else:
             return -1.
@@ -626,9 +626,10 @@ class DQNEnvironment(object):
 
         # define local peak as the maximum num in area with radius = rr
         peaknum = 0
+        tmp = np.zeros((2*rr+1, 2*rr+1))
         for i in range(rr,self.screen_height-rr-1):
             for j in range(rr,self.screen_width-rr-1):
-                tmp = afford_map[i-rr:i+rr+1,j-rr:j+rr+1]
+                tmp[:,:] = afford_map[i-rr:i+rr+1,j-rr:j+rr+1]
                 local_value = tmp[rr, rr]
                 tmp[rr, rr] = 0
                 if local_value > np.max(tmp) and local_value > peakjudge:
@@ -659,7 +660,8 @@ class DQNEnvironment(object):
 
             Including the beginning point and destination point
         """
-        # 96, 96 is the output of the u-net
+        '''
+        # 96, 96, 16 is the output of the u-net
         idx = np.unravel_index(action, (96, 96, 16))
         relate_local = list(idx[0:2])
         ori_depth_idx = np.unravel_index(int(idx[2]), (8,2))
@@ -667,7 +669,13 @@ class DQNEnvironment(object):
         push_depth = ori_depth_idx[1] * (-0.04) # choose in current depth or 4cm deeper one
         # (ori_depth_idx[1] - 0.5) * 0.04 # choose in two depth -0.02 or 0.02 (deeper than the pixel depth) TODO:
         push_dis = self.screen_height / 4 # fix the push distance in 32 pixel TODO:
-
+        '''
+        idx = np.unravel_index(action, (96, 96, 8))
+        relate_local = list(idx[0:2])
+        ori = idx[2] * 360. / 8.
+        push_depth = - 0.03
+        push_dis = self.screen_height / 4
+        
         # seems the output of the u-net is the same size of input so we need to resize the output idx
         relate_local = (np.asarray(relate_local) + 1.0) * self.screen_height / 96 - 1.0
         relate_local = np.round(relate_local)

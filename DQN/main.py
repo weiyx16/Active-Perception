@@ -25,8 +25,8 @@ flags = tf.app.flags
 # Etc
 flags.DEFINE_boolean('use_gpu', True, 'Whether to use gpu or not')
 flags.DEFINE_boolean('is_train', True, 'Whether to do training or testing')
-# TODO: we can conver it into float directly
-flags.DEFINE_string('gpu_fraction', '1/3', 'idx / # of gpu fraction e.g. 1/3, 2/3, 3/3')
+# Notice the affordance model need about 2G Ram of the GPU so... you had better use less than 2/3 in 8G titan
+flags.DEFINE_string('gpu_fraction', '60/100', 'idx / # of gpu fraction e.g. 1/3, 2/3, 3/3')
 flags.DEFINE_integer('random_seed', 123, 'Value of random seed')
 
 FLAGS = flags.FLAGS
@@ -39,7 +39,8 @@ def calc_gpu_fraction(fraction_string):
     idx, num = fraction_string.split('/')
     idx, num = float(idx), float(num)
 
-    fraction = 1 / (num - idx + 1)
+    # fraction = 1 / (num - idx + 1)
+    fraction = idx/num
     print(" [*] Use GPU Fraction is : %.4f" % fraction)
     return fraction
 

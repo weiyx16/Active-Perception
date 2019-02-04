@@ -40,7 +40,7 @@ class BaseModel(object):
 
     @property
     def checkpoint_dir(self):
-        return os.path.join(self.ckpt_dir, self.env_name + '/dqn_model.ckpt')
+        return os.path.join(self.ckpt_dir, 'dqn_model_ckpt')
 
     @property
     def saver(self):

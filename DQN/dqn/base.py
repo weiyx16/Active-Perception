@@ -23,17 +23,17 @@ class BaseModel(object):
 
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir)
-        self.saver.save(self.sess, self.checkpoint_dir, global_step=step)
+        self._saver.save(self.sess, self.checkpoint_dir, global_step=step)
 
     def load_model(self):
         print(" [*] Loading checkpoints...")
-        ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
+        ckpt = tf.train.get_checkpoint_state(self.ckpt_dir)
         if ckpt and ckpt.model_checkpoint_path:
-            self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+            self._saver.restore(self.sess, ckpt.model_checkpoint_path)
             print(" [*] Load SUCCESS: %s" % ckpt.model_checkpoint_path)
             return True
         else:
-            print(" [!] Load FAILED: %s" % self.checkpoint_dir)
+            print(" [!] Load FAILED: %s" % self.ckpt_dir)
             print(" [*] Created model with fresh parameters.")
             # self.sess.run(tf.global_variables_initializer())
             return False

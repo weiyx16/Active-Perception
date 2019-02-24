@@ -4,13 +4,13 @@
     Torch7
     CUDA 8.0
     Cudnn 6.0
-
 """
 
 import random
 import tensorflow as tf 
 from dqn.agent import Agent
 from simulation.environment import DQNEnvironment
+from experiment.environment import REALEnvironment
 from config import DQNConfig
 import pprint
 # 输出格式的对象字符串到指定的stream,最后以换行符结束。
@@ -25,6 +25,7 @@ flags = tf.app.flags
 # Etc
 flags.DEFINE_boolean('use_gpu', True, 'Whether to use gpu or not')
 flags.DEFINE_boolean('is_train', True, 'Whether to do training or testing')
+flags.DEFINE_boolean('is_sim', True, 'Whether test in simulation or true ur')
 # Notice the affordance model need about 2G Ram of the GPU so... you had better use less than 2/3 in 8G titan
 flags.DEFINE_string('gpu_fraction', '60/100', 'idx / # of gpu fraction e.g. 1/3, 2/3, 3/3')
 flags.DEFINE_integer('random_seed', 123, 'Value of random seed')
@@ -50,6 +51,7 @@ def main(_):
         raise ValueError("--gpu_fraction should be defined")
     gpu_options = tf.GPUOptions(
         per_process_gpu_memory_fraction = calc_gpu_fraction(FLAGS.gpu_fraction))
+    # 在终端监视：watch -n 10 nvidia-smi
 
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -59,28 +61,24 @@ def main(_):
 
         # Notice before the process 
         # Code in remoteApi.start(19999) in Vrep otherwise it may cause some unpredictable problem
-        env = DQNEnvironment(config)
+        
         if not tf.test.is_gpu_available() and FLAGS.use_gpu:
             raise Exception("use_gpu flag is true when no GPUs are available")
-        
-        agent = Agent(config, env, sess)
+
         if config.is_train:
+            env = DQNEnvironment(config)
+            agent = Agent(config, env, sess)
             agent.train()
         else:
-            agent.play()
-        '''
-        flag=True
-        while flag: 
-            command = input('>> ')
-            if command =="quit":
-                break
-            elif command =="new":
-                env.new_scene()
-            elif command =="act":
-                env.act(random.randint(0,96*96*16-1))
+            if config.is_sim:
+                env = DQNEnvironment(config)
+                agent = Agent(config, env, sess)
+                agent.play()
+                agent.randomplay()
             else:
-                continue
-        '''
+                env = REALEnvironment(config)
+                agent = Agent(config, env, sess)
+                agent.exp_play()
 
         env.close()
 

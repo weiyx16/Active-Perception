@@ -1,11 +1,11 @@
 """Code from https://github.com/tambetm/simple_dqn/blob/master/src/replay_memory.py"""
-
+import sys
 import os
 import random
 import logging
 import numpy as np
 
-from .utils import save_npy, load_npy
+from util.utils import *
 
 class ReplayMemory:
     """
@@ -20,10 +20,10 @@ class ReplayMemory:
         self.memory_size = config.memory_size
         self.actions = np.empty(self.memory_size, dtype = np.uint8)
         self.rewards = np.empty(self.memory_size, dtype = np.float16)
-        self.screens = np.empty((self.memory_size, self.inChannel, config.screen_height, config.screen_width), dtype = np.float16)
+        self.screens = np.empty((self.memory_size, self.inChannel, config.screen_height // 4, config.screen_width // 4), dtype = np.float16)
         self.terminals = np.empty(self.memory_size, dtype = np.bool) # end or not
         self.history_length = config.history_length
-        self.dims = (config.screen_height, config.screen_width)
+        self.dims = (config.screen_height // 4, config.screen_width // 4)
         self.batch_size = config.batch_size
         self.count = 0
         self.current = 0

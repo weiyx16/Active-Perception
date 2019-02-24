@@ -1,9 +1,8 @@
 """
-    -- This agent is utilizing the CNN+8 U-net layer as for the Deep part (8 U-net with 8 different direction and 2 different depth)
+    -- This agent is utilizing the CNN+8 U-net layer as for the Deep part (8 U-net with 8 different direction)
     -- and the input state is 4-channel screen (with different history and memory)
 """
 import os
-import sys
 import time
 import random
 import numpy as np
@@ -15,14 +14,14 @@ from .base import BaseModel
 from .history import History
 from .replay_memory import ReplayMemory
 from .ops import linear, conv2d, max_pool, deconv2d, crop_and_concat, clipped_error
-from util.utils import *
+from .utils import get_time, save_pkl, load_pkl
 
 class Agent(BaseModel):
     def __init__(self, config, environment, sess):
         super(Agent, self).__init__(config)
         self.sess = sess
         self.weight_dir = r'./dqn/weights'
-        self.action_num = 18*18*8
+        self.action_num = 96*96*8
         self.env = environment
         self.history = History(self.config)
         self.memory = ReplayMemory(self.config, self.model_dir)
@@ -62,7 +61,7 @@ class Agent(BaseModel):
             # 1. predict
             action = self.predict(self.history.get())
             # 2. act
-            # notice the action is in [0, 18*18*8-1]
+            # notice the action is in [0, 96*96*8-1]
             screen, reward, terminal = self.env.act(action, if_train=True)
             # 3. observe & store
             self.observe(screen, reward, action, terminal)
@@ -206,7 +205,7 @@ class Agent(BaseModel):
         # notice get eval in the new state
         # s_t_plus_l已经是batch_size*x*x*x的4-D tensor了
         q_t_plus_1 = self.target_q_flat.eval({self.target_s_t: s_t_plus_1})
-        # q_t_plus_l = batch_size * self.action_num(18*18*8)
+        # q_t_plus_l = batch_size * self.action_num(96*96*8)
 
         terminal = np.array(terminal) + 0.
         max_q_t_plus_1 = np.max(q_t_plus_1, axis=1) #对每个sample 得到所有动作里最大的q_value
@@ -248,58 +247,76 @@ class Agent(BaseModel):
             if self.cnn_format == 'NHWC':
                 # a 4-D tensor
                 self.s_t = tf.placeholder('float32',
-                    [None, self.screen_height //4 , self.screen_width //4 , self.history_length*self.inChannel], name='s_t')
+                    [None, self.screen_height, self.screen_width, self.history_length*self.inChannel], name='s_t')
             else:
                 self.s_t = tf.placeholder('float32',
-                    [None, self.history_length*self.inChannel, self.screen_height //4 , self.screen_width //4 ], name='s_t')
+                    [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='s_t')
 
-            # s_t = None*32*32*16(history_length*inChannel)
+            # s_t = None*128*128*16(history_length*inChannel)
             for i in range(8):
                 idx = str(i)
                 # downsample_1
                 self.w = {}
                 self.l1, self.w['l1_1_w'], self.w['l1_1_b'] = conv2d(self.s_t,
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_1')
-                # l1 = None*30*30*128
+                # l1 = None*126*126*128
                 self.l2, self.w['l1_2_w'], self.w['l1_2_b'] = conv2d(self.l1,
-                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_2')
-                # l2 = None*28*28*256
+                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l1_2')
+                # l2 = None*124*124*128
 
                 self.l3 = max_pool(self.l2, [2, 2], [2, 2], self.cnn_format, name=idx +'_m1')
-                # l3 = None*14*14*256
+                # l3 = None*62*62*128
+
+                # downsample_2 (adjusted)
+                self.l4, self.w['l2_1_w'], self.w['l2_1_b'] = conv2d(self.l3,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l2_1')
+                # l4 = None*60*60*256
+
+                self.l5 = max_pool(self.l4, [2, 2], [2, 2], self.cnn_format, name=idx +'_m2')
+                # l5 = None*30*30*256
                                 
                 # Bottom layer
-                self.l4, self.w['l2_1_w'], self.w['l2_1_b'] = conv2d(self.l3,
-                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l2_1')
-                # l4 = None*12*12*512
+                self.l6, self.w['l3_1_w'], self.w['l3_1_b'] = conv2d(self.l5,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_1')
+                # l6 = None*28*28*512
+                self.l7, self.w['l3_2_w'], self.w['l3_2_b'] = conv2d(self.l6,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_2')            
+                # l7 = None*26*26*512
 
                 # Upsampling_1 the output shape: https://datascience.stackexchange.com/questions/26451/how-to-calculate-the-output-shape-of-conv2d-transpose
-                self.l5, self.w['U1_w'] = deconv2d(self.l4, 
+                self.l8, self.w['U1_w'] = deconv2d(self.l7, 
                     [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U1')
-                # l5 = None*24*24*256
+                # l8 = None*52*52*256
                 
-                # Cascading (l2, l5)
-                self.l6 = crop_and_concat(self.l2, self.l5, self.cnn_format, name=idx+'_CrConc1')
-                # l6 = None*24*24*512
+                # Cascading (l4, l8)
+                self.l9 = crop_and_concat(self.l4, self.l8, self.cnn_format, name=idx+'_CrConc1')
+                # l9 = None*52*52*512
 
                 # Conv2d
-                self.l7, self.w['l3_1_w'], self.w['l3_1_b'] = conv2d(self.l6,
-                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_1')
-                # l7 = None*22*22*128
+                self.l10, self.w['l4_1_w'], self.w['l4_1_b'] = conv2d(self.l9,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l4_1')
+                # l10 = None*50*50*256
+
+                # Upsampling_2
+                self.l11, self.w['U2_w'] = deconv2d(self.l10, 
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_U2')
+                # l11 = None*100*100*128       
+
+                # Cascading (l2, l11)
+                self.l12 = crop_and_concat(self.l2, self.l11, self.cnn_format, name=idx+'_CrConc2')
+                # l12 = None*100*100*256
 
                 # Conv2d                
-                self.l8, self.w['l3_2_w'], self.w['l3_2_b'] = conv2d(self.l7,
-                    32, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_2')
-                # l8 = None*20*20*32
-
-                self.l9, self.w['l3_3_w'], self.w['l3_3_b'] = conv2d(self.l8,
-                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l3_3')
-                # l9 = None*18*18*4(inChannel)
-
+                self.l13, self.w['l5_1_w'], self.w['l5_1_b'] = conv2d(self.l12,
+                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l5_1')
+                # l13 = None*98*98*64(inChannel)
+                self.l14, self.w['l5_2_w'], self.w['l5_2_b'] = conv2d(self.l13,
+                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_l5_2')
+                # l14 = None*96*96*4(inChannel)
                 # ->output
-                self.q, self.w['q_w'], self.w['q_b'] = conv2d(self.l9,
+                self.q, self.w['q_w'], self.w['q_b'] = conv2d(self.l14,
                     1, [1, 1], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_lq')
-                # q = None*18*18*1
+                # q = None*96*96*1
                 # [ref] https://www.jianshu.com/p/f9b0c2c74488 https://blog.csdn.net/qq_18293213/article/details/72423592
 
                 if i == 0:
@@ -311,10 +328,10 @@ class Agent(BaseModel):
                         self.q_all = tf.concat([self.q_all, self.q], 1)
                 self.w_all.append(self.w)
 
-            # q_all = None*18*18*8
+            # q_all = None*96*96*8
             shape = self.q_all.get_shape().as_list()
             self.q_flat = tf.reshape(self.q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(18^2*8)
+            # q_flat = None*(96^2*8)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
             # Find every max q_flat -> action index for each sample in batch
             self.q_action = tf.argmax(self.q_flat, axis=1)
@@ -337,10 +354,10 @@ class Agent(BaseModel):
             if self.cnn_format == 'NHWC':
                 # a 4-D tensor
                 self.target_s_t = tf.placeholder('float32',
-                    [None, self.screen_height //4 , self.screen_width //4 , self.history_length*self.inChannel], name='target_s_t')
+                    [None, self.screen_height, self.screen_width, self.history_length*self.inChannel], name='target_s_t')
             else:
                 self.target_s_t = tf.placeholder('float32',
-                    [None, self.history_length*self.inChannel, self.screen_height //4 , self.screen_width //4 ], name='target_s_t')
+                    [None, self.history_length*self.inChannel, self.screen_height, self.screen_width], name='target_s_t')
             
             # s_t = None*128*128*8(history_length*inChannel)
             for i in range(8):
@@ -349,46 +366,64 @@ class Agent(BaseModel):
                 self.t_w = {}
                 self.target_l1, self.t_w['l1_1_w'], self.t_w['l1_1_b'] = conv2d(self.target_s_t,
                     128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_1')
-                # l1 = None*30*30*128
+                # l1 = None*126*126*128
                 self.target_l2, self.t_w['l1_2_w'], self.t_w['l1_2_b'] = conv2d(self.target_l1,
-                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_2')
-                # l2 = None*28*28*256
+                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l1_2')
+                # l2 = None*124*124*128
 
                 self.target_l3 = max_pool(self.target_l2, [2, 2], [2, 2], self.cnn_format, name=idx +'_target_m1')
-                # l3 = None*14*14*256
+                # l3 = None*62*62*128
+
+                # downsample_2 (adjusted)
+                self.target_l4, self.t_w['l2_1_w'], self.t_w['l2_1_b'] = conv2d(self.target_l3,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l2_1')
+                # l4 = None*60*60*256
+
+                self.target_l5 = max_pool(self.target_l4, [2, 2], [2, 2], self.cnn_format, name=idx +'_target_m2')
+                # l5 = None*30*30*256
                                 
                 # Bottom layer
-                self.target_l4, self.t_w['l2_1_w'], self.t_w['l2_1_b'] = conv2d(self.target_l3,
-                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l2_1')
-                # l4 = None*12*12*512
+                self.target_l6, self.t_w['l3_1_w'], self.t_w['l3_1_b'] = conv2d(self.target_l5,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_1')
+                # l6 = None*28*28*512
+                self.target_l7, self.t_w['l3_2_w'], self.t_w['l3_2_b'] = conv2d(self.target_l6,
+                    512, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_2')            
+                # l7 = None*26*26*512
 
-                # Upsampling_1 the output shape: https://datascience.stackexchange.com/questions/26451/how-to-calculate-the-output-shape-of-conv2d-transpose
-                self.target_l5, self.t_w['U1_w'] = deconv2d(self.target_l4, 
+                # Upsampling_1
+                self.target_l8, self.t_w['U1_w'] = deconv2d(self.target_l7, 
                     [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U1')
-                # l5 = None*24*24*256
-                
-                # Cascading (l2, l5)
-                self.target_l6 = crop_and_concat(self.target_l2, self.target_l5, self.cnn_format, name=idx+'_target_CrConc1')
-                # l6 = None*24*24*512
+                # l8 = None*52*52*256
+
+                # Cascading (l4, l8)
+                self.target_l9 = crop_and_concat(self.target_l4, self.target_l8, self.cnn_format, name=idx+'_target_CrConc1')
+                # l9 = None*52*52*512
 
                 # Conv2d
-                self.target_l7, self.t_w['l3_1_w'], self.t_w['l3_1_b'] = conv2d(self.target_l6,
-                    128, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_1')
-                # l7 = None*22*22*128
+                self.target_l10, self.t_w['l4_1_w'], self.t_w['l4_1_b'] = conv2d(self.target_l9,
+                    256, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l4_1')
+                # l10 = None*50*50*256
+
+                # Upsampling_2
+                self.target_l11, self.t_w['U2_w'] = deconv2d(self.target_l10, 
+                    [2, 2], [2, 2], initializer, activation_fn, self.cnn_format, name=idx +'_target_U2')
+                # l11 = None*100*100*128       
+                       
+                # Cascading (l2, l11)
+                self.target_l12 = crop_and_concat(self.target_l2, self.target_l11, self.cnn_format, name=idx+'_target_CrConc2')
+                # l12 = None*100*100*256
 
                 # Conv2d                
-                self.target_l8, self.t_w['l3_2_w'], self.t_w['l3_2_b'] = conv2d(self.target_l7,
-                    32, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_2')
-                # l8 = None*20*20*32
-
-                self.target_l9, self.t_w['l3_3_w'], self.t_w['l3_3_b'] = conv2d(self.target_l8,
-                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l3_3')
-                # l9 = None*18*18*4(inChannel)
-
+                self.target_l13, self.t_w['l5_1_w'], self.t_w['l5_1_b'] = conv2d(self.target_l12,
+                    64, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l5_1')
+                # l13 = None*98*98*64(inChannel)
+                self.target_l14, self.t_w['l5_2_w'], self.t_w['l5_2_b'] = conv2d(self.target_l13,
+                    self.inChannel, [3, 3], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_l5_2')
+                # l14 = None*96*96*4(inChannel)
                 # ->output
-                self.target_q, self.t_w['q_w'], self.t_w['q_b'] = conv2d(self.target_l9,
+                self.target_q, self.t_w['q_w'], self.t_w['q_b'] = conv2d(self.target_l14,
                     1, [1, 1], [1, 1], initializer, activation_fn, self.cnn_format, name=idx +'_target_lq')
-                # q = None*18*18*1
+                # q = None*96*96*1
                 # [ref] https://www.jianshu.com/p/f9b0c2c74488 https://blog.csdn.net/qq_18293213/article/details/72423592
 
                 if i == 0:
@@ -402,13 +437,12 @@ class Agent(BaseModel):
 
             shape = self.target_q_all.get_shape().as_list()
             self.target_q_flat = tf.reshape(self.target_q_all, [-1, reduce(lambda x, y: x * y, shape[1:])])
-            # q_flat = None*(18^2*8)
+            # q_flat = None*(96^2*8)
             # Output dims of q_flat is batchsize * (pixel_number*ori*depth)
 
             # TODO: What's there two stuffs for????
             self.target_q_idx = tf.placeholder('int32', [None, None], 'outputs_idx')
             self.target_q_with_idx = tf.gather_nd(self.target_q_flat, self.target_q_idx)
-
         print(' [*] Build Q-Target Scope')
 
         # Used to Set target network params from estimation network (let the t_w_input = w, then assign t_w with t_w_input)
@@ -461,9 +495,9 @@ class Agent(BaseModel):
                     self.learning_rate_decay_step,
                     self.learning_rate_decay,
                     staircase=True))
-
+            # TODO:now We can change the momentum and epsilon params
             self.optim = tf.train.RMSPropOptimizer(
-                self.learning_rate_op, momentum=0.9, epsilon=0.01).minimize(self.loss)
+                self.learning_rate_op, momentum=0.95, epsilon=0.01).minimize(self.loss)
         print(' [*] Build Optimize Scope')
 
         # display all the params in the tfboard by summary
@@ -548,7 +582,7 @@ class Agent(BaseModel):
         for summary_str in summary_str_lists:
             self.writer.add_summary(summary_str, self.step)
 
-    def play(self, n_step=50, n_episode=12, remove_obj_num = 4, test_ep=None):
+    def play(self, n_step=50, n_episode=12, remove_obj_num = 4, test_ep=None, render=False):
         """
             -- Use for testing simulation
             -- use history here, not memory(used in training - to get random sample from past test)
@@ -630,38 +664,3 @@ class Agent(BaseModel):
             print(" Best episode : [%d] Best end step : %d" % (best_idx, best_end_step))
             print(" Average end step for now: [%f]" %(all_end_step/(idx+1)))
             print(" Average end rate in %d steps for now: [%f]" %(n_step, end_times/(idx+1)))
-
-    def exp_play(self, remove_obj_num = 4, test_ep=None, use_dqn = True):
-
-        if test_ep == None:
-            test_ep = self.ep_end
-
-        if use_dqn:
-            '''
-                Use DQN to change the environment
-            '''
-            # random init the scene manually
-            # 1. get the initial screens
-            screen, _, _, terminal = self.env.new_scene()
-            # 2. add to history
-            for _ in range(self.history_length):
-                self.history.add(screen)
-
-            while True:
-                action = self.predict(self.history.get(), test_ep)
-                # 2. act
-                screen, reward, terminal = self.env.act(action)
-                # 3. observe
-                self.history.add(screen)
-                if terminal:
-                    # apply the suck action
-                    self.env.ope()
-
-        else:
-            '''
-                # Only use affordance to choose where to suck
-            '''
-            self.env.new_scene()
-            while True:
-                self.env.observe_screen()
-                self.env.ope()

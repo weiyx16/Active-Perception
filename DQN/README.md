@@ -1,47 +1,49 @@
 # Deep Reinforcement Learning for robotic manuplation
 
-Tensorflow implementation of DQN for our simulation
-
-**A WIP Repo**
-
-This implementation contains:
-
-1. Deep Q-network and Q-learning
-2. Experience replay memory
-    - to reduce the correlations between consecutive updates
-3. Network for Q-learning targets are fixed for intervals
-    - to reduce the correlations between target and predicted Q-values
-4. Double DQN / Duel DQN (unfinished)
+Tensorflow implementation of DQN for our active exploration strategy. It includes two kinds of model, with one outputs 8*8*8 kinds of action and the other 18*18*8. And the code is motivated by [DQN-tensorflow](https://github.com/devsisters/DQN-tensorflow).  
 
 ## Environments
 
+### For our model
+
 - Python 3.6
 - [tqdm](https://github.com/tqdm/tqdm)
-- [SciPy](http://www.scipy.org/install.html) or [OpenCV2](http://opencv.org/)
-- [TensorFlow 1.9.0](https://github.com/tensorflow/tensorflow/tree/r0.12)
+- [SciPy](http://www.scipy.org/install.html)
+- [OpenCV3](http://opencv.org/)
+- [Numpy](http://www.numpy.org/)
+- [Pillow](https://python-pillow.org/)
+- [TensorFlow 1.4.1](https://github.com/tensorflow/)  
+- [urx](https://github.com/SintefManufacturing/python-urx)  
+- [pyserial](https://github.com/pyserial/pyserial)  
+- [pypcl](https://github.com/cmpute/pypcl)  
+- [h5py](https://github.com/h5py/h5py)
 
+### Combine with Affordance map
+
+- Torch 7  
+- For more details, ref to [Affordance map](http://arc.cs.princeton.edu)
 
 ## Usage
-
-First, install prerequisites with:
-
-    $ pip install tqdm
 
 To train a model:
 
     $ python main.py --is_train=True
 
-To test the model:
+To evaluate the model:  
 
-    $ python main.py --is_train=False
+- In simulation environment  
 
-## References
+    $ python main.py --is_train=False --is_sim=True
 
-- [Source code](https://github.com/devsisters/DQN-tensorflow)
+- In real ur5 manipulator and kinect V2 camera:  
 
-## Notice
+    $ python main.py --is_train=False --is_sim=False
 
-History是指每次观测都观测4次连续结果，即连续几次的观测结果合在一起，在通道维度上进行叠加。和batch_size没有影响。  
+## Details
+
+The DQN structure has 8 parallel U-Net-like modules to output subpixel-wised operation locations.  
+We trained the model in a simulation environment named [V-Rep](http://coppeliarobotics.com/) and our simulation scene file is in './simulation/environment.ttt'.  
+The model is test on ubuntu 16.04 only, with CUDA 8.0, CUDNN 6.0.  
 
 ## License
 

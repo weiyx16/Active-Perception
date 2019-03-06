@@ -27,17 +27,23 @@ Tensorflow implementation of DQN for our active exploration strategy. It include
 
 To train a model:
 
+```sh
     $ python main.py --is_train=True
+```
 
 To evaluate the model:  
 
 - In simulation environment  
 
-    $ python main.py --is_train=False --is_sim=True
+```sh
+    $ python main.py --is_train=False --is_sim=True  
+```
 
 - In real ur5 manipulator and kinect V2 camera:  
 
-    $ python main.py --is_train=False --is_sim=False
+```sh
+    $ python main.py --is_train=False --is_sim=False  
+```
 
 ## Details
 

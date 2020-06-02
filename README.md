@@ -1,8 +1,8 @@
-# Active_Exploration
+# Deep Reinforcement Learning for Robotic Pushing and Picking in Cluttered Environment
 
-An quick official reproduce repo for the paper: [Deep Reinforcement Learning for Robotic Pushing and Picking in Cluttered Environment](https://ieeexplore.ieee.org/document/8967899) appeared in IROS 2019, by Yuhong Deng\*, Xiaofeng Guo\*, [Yixuan Wei](weiyx16.github.io)\*, Kai Lu\*, Bin Fang, Di Guo, Huaping Liu, Fuchun Sun.  
+An quick official reproduce repo for the paper: [Deep Reinforcement Learning for Robotic Pushing and Picking in Cluttered Environment](https://ieeexplore.ieee.org/document/8967899) appeared in **IROS 2019**, by Yuhong Deng\*, Xiaofeng Guo\*, [Yixuan Wei](weiyx16.github.io)\*, Kai Lu\*, Bin Fang, Di Guo, Huaping Liu, Fuchun Sun.  
 
-This work combine [Affordance map](http://arc.cs.princeton.edu) with active exploration policy by deep reinforcement learning to increase manipulation success rate. Especially, we designed a composite robotic manipulator including two paralleled fingers and a suction cup. By introducing promising strategy into grasping process, we make a definite improvement on robot grasping in clutter scenes.  
+This work combine [Affordance map](http://arc.cs.princeton.edu) with active exploration policy by deep reinforcement learning to increase manipulation success rate. Especially, we designed a composite robotic manipulator including two paralleled fingers and a suction cup. By introducing promising strategy into grasping process, we make a definite improvement on robot grasping in clutter scenes. Code is mainly by [Yixuan Wei](weiyx16.github.io)\*.  
 
 ![](./main.png)
 

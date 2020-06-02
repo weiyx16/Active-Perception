@@ -1,4 +1,4 @@
-# Deep Reinforcement Learning for robotic manuplation
+# Deep Reinforcement Learning for Robotic Pushing and Picking in Cluttered Environment
 
 Tensorflow implementation of DQN for our active exploration strategy. It includes two kinds of model, with one outputs 8\*8\*8 kinds of action and the other 18\*18\*8, the only difference between them is the resolution of the output action and the last **8** stands for 8 directions. And the code is motivated by [DQN-tensorflow](https://github.com/devsisters/DQN-tensorflow).  
 
@@ -35,8 +35,11 @@ The *blocks* directory in *simulation* directory stores the simulation objects w
 
 ### Training and Evaluation
 
-Firstly, you have to open the V-Rep software and open the simulation file in [Simulation.ttt](./simulation/Simulation.ttt) and in the command console, please type in *simRemoteApi.start(19999)* for building connection between python script and V-Rep.
+Firstly, you have to open the V-Rep software and open the simulation file in [Simulation.ttt](./simulation/Simulation.ttt) and in the command console, please type in the following code for building connection between python script and V-Rep.
 
+```Lua
+    simRemoteApi.start(19999)
+```
 Laterly, you can run the training code. Usually you can directly see the moving robotic arms in the simulation. Notice, to obtain the affordance map, we will call a torch process in the python script and save the map in your local machine.  
 
 ```sh

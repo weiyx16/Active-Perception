@@ -118,6 +118,7 @@ class Camera(object):
             -- use this function to save background RGB and Depth in the beginning
             -- it is used for the post process of affordance map
         """
+        ## if you want to get the background image again, please uncomment the following code
         # self.bg_depth, self.bg_color = self.get_camera_data()
         # self.bg_color = np.asarray(self.bg_color) / 255.0
         # self.bg_depth = np.asarray(self.bg_depth) / 10000

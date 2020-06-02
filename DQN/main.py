@@ -13,7 +13,6 @@ from simulation.environment import DQNEnvironment
 from experiment.environment import REALEnvironment
 from config import DQNConfig
 import pprint
-# 输出格式的对象字符串到指定的stream,最后以换行符结束。
 pp = pprint.PrettyPrinter().pprint
 
 """
@@ -46,12 +45,10 @@ def calc_gpu_fraction(fraction_string):
     return fraction
 
 def main(_):
-  # tensorflow 在执行过程中会默认使用全部的 GPU 内存，给系统保留 200 M，因此我们可以使用如下语句指定 GPU 内存的分配比例：
     if FLAGS.gpu_fraction == '':
         raise ValueError("--gpu_fraction should be defined")
     gpu_options = tf.GPUOptions(
         per_process_gpu_memory_fraction = calc_gpu_fraction(FLAGS.gpu_fraction))
-    # 在终端监视：watch -n 10 nvidia-smi
 
     with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
@@ -83,5 +80,4 @@ def main(_):
         env.close()
 
 if __name__ == '__main__':
-    # 上述第一行代码表示如果当前是从其它模块调用的该模块程序，则不会运行main函数！而如果就是直接运行的该模块程序，则会运行main函数。
     tf.app.run()
